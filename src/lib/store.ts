@@ -1,9 +1,20 @@
 import { writable, derived } from 'svelte/store';
 import { browser } from '$app/environment';
-import type { AppState, Item, User, BorrowRequest, Notification, BorrowHistory, Tag, FriendRequest, ItemCondition, WishlistItem } from './types';
+import type {
+  AppState,
+  Item,
+  User,
+  BorrowRequest,
+  Notification,
+  BorrowHistory,
+  Tag,
+  FriendRequest,
+  LenderReturnFeedback,
+  WishlistItem
+} from './types';
 import { initialAppState } from './mockData';
 import { rangesOverlap, todayLocalISO } from './dates';
-import { NUDGE_DELAY_DAYS } from './constants';
+import { MAX_RATING, MIN_RATING, NUDGE_DELAY_DAYS } from './constants';
 
 export const STORAGE_KEY = 'distributed-library-app-state';
 
@@ -47,7 +58,7 @@ function loadState(): AppState {
           if (!merged.users.some((u) => u.id === merged.currentUserId)) {
             merged.currentUserId = defaults.currentUserId;
           }
-          return merged;
+          return migrateState(merged);
         }
       } catch (e) {
         console.error('Failed to parse stored state:', e);
@@ -55,6 +66,35 @@ function loadState(): AppState {
     }
   }
   return defaults;
+}
+
+/**
+ * Bring state persisted by an older version of the app up to the current
+ * schema. Every step must be idempotent — this runs on every load.
+ */
+function migrateState(state: AppState): AppState {
+  return {
+    ...state,
+    // Two-sided handoff arrays were added later; older requests lack them.
+    borrowRequests: state.borrowRequests.map((r) => ({
+      ...r,
+      pickupConfirmedBy: Array.isArray(r.pickupConfirmedBy) ? r.pickupConfirmedBy : [],
+      returnConfirmedBy: Array.isArray(r.returnConfirmedBy) ? r.returnConfirmedBy : []
+    })),
+    // Before borrower reviews existed, `rating`/`review` were written by the
+    // lender about the borrower. Entries with a rating but no `reviewerId`
+    // are from that era: move them to the borrower-rating fields so they
+    // stop being displayed (and averaged) as item reviews.
+    borrowHistory: state.borrowHistory.map((h) => {
+      if (h.reviewerId || (h.rating === undefined && !h.review)) return h;
+      const { rating, review, ...rest } = h;
+      return {
+        ...rest,
+        borrowerRating: rest.borrowerRating ?? rating,
+        borrowerReview: rest.borrowerReview ?? review
+      };
+    })
+  };
 }
 
 // Save state to localStorage
@@ -116,6 +156,160 @@ function hasDateConflict(
   );
 }
 
+/** Round to one decimal place, the precision ratings are displayed at. */
+function roundRating(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function isValidRating(rating: number): boolean {
+  return Number.isFinite(rating) && rating >= MIN_RATING && rating <= MAX_RATING;
+}
+
+/**
+ * The item's rating recomputed from borrower-written reviews. When there are
+ * none yet the current (seeded) rating is kept rather than dropping to 0.
+ */
+function computeItemRating(item: Item, history: BorrowHistory[]): number {
+  const ratings = history
+    .filter((h) => h.itemId === item.id && h.reviewerId && typeof h.rating === 'number')
+    .map((h) => h.rating as number);
+  if (ratings.length === 0) return item.rating;
+  return roundRating(ratings.reduce((sum, r) => sum + r, 0) / ratings.length);
+}
+
+/**
+ * Fold a new lender rating into the borrower's reputation as a running mean
+ * weighted by their completed borrows, so a seeded 4.8 over 23 borrows isn't
+ * wiped out by a single new rating.
+ */
+function foldUserRating(user: User, newRating: number): number {
+  const priorCount = Math.max(0, user.totalBorrows);
+  if (priorCount === 0 || user.rating <= 0) return roundRating(newRating);
+  return roundRating((user.rating * priorCount + newRating) / (priorCount + 1));
+}
+
+/** Whether any other approved/active loan still holds the item. */
+function isStillOnLoan(state: AppState, itemId: string, excludeRequestId: string): boolean {
+  return state.borrowRequests.some(
+    (r) =>
+      r.id !== excludeRequestId &&
+      r.itemId === itemId &&
+      (r.status === 'approved' || r.status === 'active')
+  );
+}
+
+/**
+ * Wishlist notifications for an item that just became available again, sent
+ * only to subscribers who are allowed to see it (and not to the person who
+ * just gave it back).
+ */
+function wishlistAvailableNotifications(
+  state: AppState,
+  item: Item,
+  excludeUserId?: string
+): Notification[] {
+  return state.wishlist
+    .filter(
+      (w) =>
+        w.itemId === item.id &&
+        w.notifyOnAvailable &&
+        w.userId !== excludeUserId &&
+        canUserViewItem(item, w.userId, state)
+    )
+    .map((sub) =>
+      createNotification(
+        sub.userId,
+        'wishlist-available',
+        'Item Now Available!',
+        `${item.name} is now available to borrow`,
+        item.id
+      )
+    );
+}
+
+/**
+ * Both parties have confirmed the return: move the request to history, free
+ * the item, update counters and reputations, and ask the borrower to review.
+ */
+function finalizeReturn(
+  state: AppState,
+  request: BorrowRequest,
+  feedback: LenderReturnFeedback
+): AppState {
+  const item = state.items.find((i) => i.id === request.itemId);
+  const conditionBefore = item?.condition;
+  const wasUnavailable = item ? !item.available : false;
+
+  const history: BorrowHistory = {
+    id: createId('hist'),
+    itemId: request.itemId,
+    borrowerId: request.borrowerId,
+    lenderId: request.lenderId,
+    startDate: request.startDate,
+    endDate: request.endDate,
+    actualReturnDate: todayLocalISO(),
+    borrowerRating: feedback.rating,
+    borrowerReview: feedback.review || undefined,
+    conditionBefore,
+    conditionAfter: feedback.condition || conditionBefore
+  };
+
+  const stillOnLoan = isStillOnLoan(state, request.itemId, request.id);
+
+  const updatedItems = item
+    ? state.items.map((i) =>
+        i.id === item.id
+          ? {
+              ...i,
+              available: !stillOnLoan,
+              condition: feedback.condition || i.condition,
+              totalBorrows: i.totalBorrows + 1
+            }
+          : i
+      )
+    : state.items;
+
+  const updatedUsers = state.users.map((u) => {
+    if (u.id === request.borrowerId) {
+      return {
+        ...u,
+        rating: feedback.rating !== undefined ? foldUserRating(u, feedback.rating) : u.rating,
+        totalBorrows: u.totalBorrows + 1
+      };
+    }
+    if (u.id === request.lenderId) return { ...u, totalLends: u.totalLends + 1 };
+    return u;
+  });
+
+  const notifications: Notification[] = [];
+  const lender = state.users.find((u) => u.id === request.lenderId);
+  if (item) {
+    notifications.push(
+      createNotification(
+        request.borrowerId,
+        'review-request',
+        'How was the item?',
+        `${item.name} is back with ${lender?.name ?? 'its owner'}. Leave a quick review to help others.`,
+        item.id
+      )
+    );
+    if (wasUnavailable && !stillOnLoan) {
+      notifications.push(...wishlistAvailableNotifications(state, item, request.borrowerId));
+    }
+  }
+
+  return {
+    ...state,
+    items: updatedItems,
+    users: updatedUsers,
+    borrowRequests: state.borrowRequests.map((r) =>
+      r.id === request.id ? { ...r, status: 'completed' as const } : r
+    ),
+    borrowHistory: [...state.borrowHistory, history],
+    notifications: [...state.notifications, ...notifications]
+  };
+}
+
 // Create the main app store
 function createAppStore() {
   const { subscribe, set, update } = writable<AppState>(loadState());
@@ -168,11 +362,63 @@ function createAppStore() {
       }));
     },
 
-    deleteItem: (itemId: string) => {
-      update((state) => ({
-        ...state,
-        items: state.items.filter((item) => item.id !== itemId)
-      }));
+    /**
+     * Remove an item from the library. Refused while someone physically has
+     * it (an approved or active loan). Pending requests are declined with a
+     * notification, and the item is scrubbed from tags and wishlists.
+     */
+    deleteItem: (itemId: string): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Item not found' };
+      update((state) => {
+        const item = state.items.find((i) => i.id === itemId);
+        if (!item) return state;
+
+        if (item.lenderId !== state.currentUserId) {
+          result = { ok: false, error: 'Only the owner can delete this item' };
+          return state;
+        }
+
+        const onLoan = state.borrowRequests.some(
+          (r) => r.itemId === itemId && (r.status === 'approved' || r.status === 'active')
+        );
+        if (onLoan) {
+          result = {
+            ok: false,
+            error: 'This item is reserved or on loan — wait until it has been returned'
+          };
+          return state;
+        }
+
+        const owner = state.users.find((u) => u.id === item.lenderId);
+        const denials: Notification[] = state.borrowRequests
+          .filter((r) => r.itemId === itemId && r.status === 'pending')
+          .map((r) =>
+            createNotification(
+              r.borrowerId,
+              'request-denied',
+              'Item No Longer Available',
+              `${owner?.name ?? 'The owner'} removed ${item.name} from their library, so your request was closed`,
+              r.id
+            )
+          );
+
+        result = { ok: true };
+        return {
+          ...state,
+          items: state.items.filter((i) => i.id !== itemId),
+          tags: state.tags.map((tag) =>
+            tag.itemIds.includes(itemId)
+              ? { ...tag, itemIds: tag.itemIds.filter((id) => id !== itemId) }
+              : tag
+          ),
+          wishlist: state.wishlist.filter((w) => w.itemId !== itemId),
+          borrowRequests: state.borrowRequests.map((r) =>
+            r.itemId === itemId && r.status === 'pending' ? { ...r, status: 'denied' as const } : r
+          ),
+          notifications: [...state.notifications, ...denials]
+        };
+      });
+      return result;
     },
 
     // Borrow request actions
@@ -295,135 +541,269 @@ function createAppStore() {
       return result;
     },
 
-    /** Lender confirms the borrower picked the item up: approved → active. */
-    markPickedUp: (requestId: string): ActionResult => {
+    /**
+     * Borrower cancels a request they no longer need (pending or approved),
+     * or a lender retracts an approval before pickup. Active loans can't be
+     * cancelled — the item has to come back through the return flow.
+     */
+    cancelRequest: (requestId: string): ActionResult => {
       let result: ActionResult = { ok: false, error: 'Request not found' };
       update((state) => {
         const request = state.borrowRequests.find((r) => r.id === requestId);
         if (!request) return state;
 
-        if (request.status !== 'approved') {
-          result = { ok: false, error: 'Only approved requests can be marked as picked up' };
+        const actorId = state.currentUserId;
+        const isBorrower = actorId === request.borrowerId;
+        const isLender = actorId === request.lenderId;
+        if (!isBorrower && !isLender) {
+          result = { ok: false, error: 'Only the borrower or lender can cancel this request' };
           return state;
         }
 
-        result = { ok: true };
-        return {
-          ...state,
-          borrowRequests: state.borrowRequests.map((r) =>
-            r.id === requestId ? { ...r, status: 'active' as const } : r
-          )
-        };
-      });
-      return result;
-    },
-
-    // Complete a borrow and move to history
-    completeBorrow: (requestId: string, rating: number, review: string, newCondition?: ItemCondition): ActionResult => {
-      let result: ActionResult = { ok: false, error: 'Request not found' };
-      update((state) => {
-        const request = state.borrowRequests.find((r) => r.id === requestId);
-        if (!request) return state;
-
-        if (request.status !== 'active' && request.status !== 'approved') {
-          result = { ok: false, error: 'Only active loans can be marked as returned' };
+        if (request.status === 'pending' && !isBorrower) {
+          result = { ok: false, error: 'Decline the request instead of cancelling it' };
+          return state;
+        }
+        if (request.status !== 'pending' && request.status !== 'approved') {
+          result = { ok: false, error: 'Only pending or approved requests can be cancelled' };
           return state;
         }
 
         const item = state.items.find((i) => i.id === request.itemId);
-        const conditionBefore = item?.condition;
-        const wasUnavailable = item ? !item.available : false;
+        const actor = state.users.find((u) => u.id === actorId);
+        const otherPartyId = isBorrower ? request.lenderId : request.borrowerId;
 
-        const history: BorrowHistory = {
-          id: createId('hist'),
-          itemId: request.itemId,
-          borrowerId: request.borrowerId,
-          lenderId: request.lenderId,
-          startDate: request.startDate,
-          endDate: request.endDate,
-          actualReturnDate: todayLocalISO(),
-          rating,
-          review,
-          conditionBefore,
-          conditionAfter: newCondition || conditionBefore
-        };
-
-        // The item becomes available again unless another approved/active
-        // loan is still outstanding for it.
-        const stillOnLoan = state.borrowRequests.some(
-          (r) =>
-            r.id !== requestId &&
-            r.itemId === request.itemId &&
-            (r.status === 'approved' || r.status === 'active')
-        );
-
-        // Update item rating, availability, condition, and borrow count
-        let updatedItems = state.items;
+        const notifications: Notification[] = [];
         if (item) {
-          const allItemHistory = [...state.borrowHistory, history].filter(
-            (h) => h.itemId === item.id && h.rating
-          );
-
-          // Guard against division by zero to prevent NaN
-          const avgRating = allItemHistory.length > 0
-            ? allItemHistory.reduce((sum, h) => sum + (h.rating || 0), 0) / allItemHistory.length
-            : 0;
-
-          updatedItems = state.items.map((i) =>
-            i.id === item.id
-              ? {
-                  ...i,
-                  rating: Math.round(avgRating * 10) / 10,
-                  available: !stillOnLoan,
-                  condition: newCondition || i.condition,
-                  totalBorrows: i.totalBorrows + 1
-                }
-              : i
+          notifications.push(
+            createNotification(
+              otherPartyId,
+              'request-cancelled',
+              isBorrower ? 'Request Cancelled' : 'Reservation Cancelled',
+              isBorrower
+                ? `${actor?.name ?? 'The borrower'} cancelled their request to borrow ${item.name}`
+                : `${actor?.name ?? 'The lender'} cancelled your reservation of ${item.name}`,
+              requestId
+            )
           );
         }
 
-        // Keep the users' lending/borrowing counters in sync
-        const updatedUsers = state.users.map((u) => {
-          if (u.id === request.borrowerId) return { ...u, totalBorrows: u.totalBorrows + 1 };
-          if (u.id === request.lenderId) return { ...u, totalLends: u.totalLends + 1 };
-          return u;
-        });
-
-        // Notify wishlist subscribers, but only when the item actually
-        // transitioned back to available and only if they're allowed to see it.
-        const wishlistNotifications: Notification[] = [];
-        if (item && wasUnavailable && !stillOnLoan) {
-          const subscribers = state.wishlist.filter(
-            (w) =>
-              w.itemId === item.id &&
-              w.notifyOnAvailable &&
-              w.userId !== request.borrowerId &&
-              canUserViewItem(item, w.userId, state)
-          );
-
-          for (const sub of subscribers) {
-            wishlistNotifications.push(
-              createNotification(
-                sub.userId,
-                'wishlist-available',
-                'Item Now Available!',
-                `${item.name} is now available to borrow`,
-                item.id
-              )
-            );
+        // An approved request had reserved the item; release it.
+        let items = state.items;
+        if (item && request.status === 'approved') {
+          const stillOnLoan = isStillOnLoan(state, item.id, requestId);
+          if (!item.available && !stillOnLoan) {
+            items = state.items.map((i) => (i.id === item.id ? { ...i, available: true } : i));
+            notifications.push(...wishlistAvailableNotifications(state, item, request.borrowerId));
           }
         }
 
         result = { ok: true };
         return {
           ...state,
-          items: updatedItems,
-          users: updatedUsers,
+          items,
           borrowRequests: state.borrowRequests.map((r) =>
-            r.id === requestId ? { ...r, status: 'completed' as const } : r
+            r.id === requestId ? { ...r, status: 'cancelled' as const } : r
           ),
-          borrowHistory: [...state.borrowHistory, history],
-          notifications: [...state.notifications, ...wishlistNotifications]
+          notifications: [...state.notifications, ...notifications]
+        };
+      });
+      return result;
+    },
+
+    /**
+     * Either party confirms the physical handoff. The loan becomes active
+     * only once both the borrower and the lender have confirmed.
+     */
+    confirmPickup: (requestId: string): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Request not found' };
+      update((state) => {
+        const request = state.borrowRequests.find((r) => r.id === requestId);
+        if (!request) return state;
+
+        if (request.status !== 'approved') {
+          result = { ok: false, error: 'Only approved requests can be picked up' };
+          return state;
+        }
+
+        const actorId = state.currentUserId;
+        if (actorId !== request.borrowerId && actorId !== request.lenderId) {
+          result = { ok: false, error: 'Only the borrower or lender can confirm pickup' };
+          return state;
+        }
+
+        const confirmed = request.pickupConfirmedBy ?? [];
+        if (confirmed.includes(actorId)) {
+          result = { ok: false, error: 'You already confirmed this pickup' };
+          return state;
+        }
+
+        const nowConfirmed = [...confirmed, actorId];
+        const bothConfirmed =
+          nowConfirmed.includes(request.borrowerId) && nowConfirmed.includes(request.lenderId);
+        const otherPartyId = actorId === request.borrowerId ? request.lenderId : request.borrowerId;
+        const actor = state.users.find((u) => u.id === actorId);
+        const item = state.items.find((i) => i.id === request.itemId);
+
+        const notification = item
+          ? createNotification(
+              otherPartyId,
+              'pickup-confirmed',
+              bothConfirmed ? 'Loan Started' : 'Pickup Confirmed',
+              bothConfirmed
+                ? `${actor?.name ?? 'The other party'} confirmed too — the loan of ${item.name} is now active`
+                : `${actor?.name ?? 'The other party'} confirmed the pickup of ${item.name} — confirm on your side`,
+              requestId
+            )
+          : null;
+
+        result = { ok: true };
+        return {
+          ...state,
+          borrowRequests: state.borrowRequests.map((r) =>
+            r.id === requestId
+              ? {
+                  ...r,
+                  pickupConfirmedBy: nowConfirmed,
+                  status: bothConfirmed ? ('active' as const) : r.status
+                }
+              : r
+          ),
+          notifications: notification ? [...state.notifications, notification] : state.notifications
+        };
+      });
+      return result;
+    },
+
+    /**
+     * Either party confirms the item came back. The lender's `feedback`
+     * (rating of the borrower, condition change) is recorded whichever order
+     * the confirmations arrive in; the borrower's is ignored. When both have
+     * confirmed, the borrow is completed and moved to history.
+     */
+    confirmReturn: (requestId: string, feedback: LenderReturnFeedback = {}): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Request not found' };
+      update((state) => {
+        const request = state.borrowRequests.find((r) => r.id === requestId);
+        if (!request) return state;
+
+        if (request.status !== 'active') {
+          result = { ok: false, error: 'Only active loans can be returned' };
+          return state;
+        }
+
+        const actorId = state.currentUserId;
+        const isLender = actorId === request.lenderId;
+        if (actorId !== request.borrowerId && !isLender) {
+          result = { ok: false, error: 'Only the borrower or lender can confirm a return' };
+          return state;
+        }
+
+        const confirmed = request.returnConfirmedBy ?? [];
+        if (confirmed.includes(actorId)) {
+          result = { ok: false, error: 'You already confirmed this return' };
+          return state;
+        }
+
+        if (isLender && feedback.rating !== undefined && !isValidRating(feedback.rating)) {
+          result = { ok: false, error: `Rating must be between ${MIN_RATING} and ${MAX_RATING}` };
+          return state;
+        }
+
+        const lenderFeedback = isLender ? feedback : (request.lenderReturnFeedback ?? {});
+        const nowConfirmed = [...confirmed, actorId];
+        const bothConfirmed =
+          nowConfirmed.includes(request.borrowerId) && nowConfirmed.includes(request.lenderId);
+
+        const updatedRequest: BorrowRequest = {
+          ...request,
+          returnConfirmedBy: nowConfirmed,
+          lenderReturnFeedback: lenderFeedback
+        };
+
+        const otherPartyId = isLender ? request.borrowerId : request.lenderId;
+        const actor = state.users.find((u) => u.id === actorId);
+        const item = state.items.find((i) => i.id === request.itemId);
+        const notification = item
+          ? createNotification(
+              otherPartyId,
+              bothConfirmed ? 'item-returned' : 'return-confirmed',
+              bothConfirmed ? 'Return Complete' : 'Return Confirmed',
+              bothConfirmed
+                ? `${actor?.name ?? 'The other party'} confirmed too — ${item.name} is back home`
+                : `${actor?.name ?? 'The other party'} confirmed the return of ${item.name} — confirm on your side`,
+              requestId
+            )
+          : null;
+
+        const withConfirmation: AppState = {
+          ...state,
+          borrowRequests: state.borrowRequests.map((r) => (r.id === requestId ? updatedRequest : r)),
+          notifications: notification ? [...state.notifications, notification] : state.notifications
+        };
+
+        result = { ok: true };
+        return bothConfirmed
+          ? finalizeReturn(withConfirmation, updatedRequest, lenderFeedback)
+          : withConfirmation;
+      });
+      return result;
+    },
+
+    /**
+     * The borrower reviews the item after a completed borrow. One review per
+     * history entry; the item's rating is recomputed from borrower reviews.
+     */
+    submitItemReview: (historyId: string, rating: number, review: string): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Borrow not found' };
+      update((state) => {
+        const entry = state.borrowHistory.find((h) => h.id === historyId);
+        if (!entry) return state;
+
+        if (entry.borrowerId !== state.currentUserId) {
+          result = { ok: false, error: 'Only the borrower can review this item' };
+          return state;
+        }
+        if (entry.reviewerId) {
+          result = { ok: false, error: 'You already reviewed this borrow' };
+          return state;
+        }
+        if (!isValidRating(rating)) {
+          result = { ok: false, error: `Rating must be between ${MIN_RATING} and ${MAX_RATING}` };
+          return state;
+        }
+
+        const reviewed: BorrowHistory = {
+          ...entry,
+          rating,
+          review: review.trim() || undefined,
+          reviewerId: state.currentUserId,
+          reviewedAt: new Date().toISOString()
+        };
+        const borrowHistory = state.borrowHistory.map((h) => (h.id === historyId ? reviewed : h));
+
+        const item = state.items.find((i) => i.id === entry.itemId);
+        const reviewer = state.users.find((u) => u.id === state.currentUserId);
+        const notification = item
+          ? createNotification(
+              entry.lenderId,
+              'item-reviewed',
+              'New Review',
+              `${reviewer?.name ?? 'A borrower'} rated your ${item.name} ${rating} out of ${MAX_RATING}`,
+              item.id
+            )
+          : null;
+
+        result = { ok: true };
+        return {
+          ...state,
+          borrowHistory,
+          items: item
+            ? state.items.map((i) =>
+                i.id === item.id ? { ...i, rating: computeItemRating(i, borrowHistory) } : i
+              )
+            : state.items,
+          notifications: notification ? [...state.notifications, notification] : state.notifications
         };
       });
       return result;
@@ -492,6 +872,21 @@ function createAppStore() {
         ...state,
         tags: state.tags.map((tag) => (tag.id === tagId ? { ...tag, ...updates } : tag))
       }));
+    },
+
+    deleteTag: (tagId: string): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Tag not found' };
+      update((state) => {
+        const tag = state.tags.find((t) => t.id === tagId);
+        if (!tag) return state;
+        if (tag.createdBy !== state.currentUserId) {
+          result = { ok: false, error: 'Only the tag\'s creator can delete it' };
+          return state;
+        }
+        result = { ok: true };
+        return { ...state, tags: state.tags.filter((t) => t.id !== tagId) };
+      });
+      return result;
     },
 
     addItemToTag: (tagId: string, itemId: string) => {
@@ -769,6 +1164,36 @@ export const activeLoans = derived(appStore, ($state) =>
     (req) => req.lenderId === $state.currentUserId && req.status === 'active'
   )
 );
+
+// The borrower-side mirror of approvedLoans + activeLoans: items the current
+// user is holding or about to pick up.
+export const borrowedByMe = derived(appStore, ($state) =>
+  $state.borrowRequests.filter(
+    (req) =>
+      req.borrowerId === $state.currentUserId &&
+      (req.status === 'approved' || req.status === 'active')
+  )
+);
+
+/**
+ * Completed borrows of an item by a user that haven't been reviewed yet,
+ * most recent first. Drives the inline review form on the item page.
+ */
+export function pendingItemReviews(state: AppState, itemId: string, userId: string): BorrowHistory[] {
+  return state.borrowHistory
+    .filter((h) => h.itemId === itemId && h.borrowerId === userId && !h.reviewerId)
+    .sort((a, b) => (a.endDate < b.endDate ? 1 : a.endDate > b.endDate ? -1 : 0));
+}
+
+/** Whether a user has confirmed the given handoff step on a request. */
+export function hasConfirmed(
+  request: BorrowRequest,
+  step: 'pickup' | 'return',
+  userId: string
+): boolean {
+  const list = step === 'pickup' ? request.pickupConfirmedBy : request.returnConfirmedBy;
+  return (list ?? []).includes(userId);
+}
 
 export const incomingFriendRequests = derived(appStore, ($state) =>
   $state.friendRequests.filter(

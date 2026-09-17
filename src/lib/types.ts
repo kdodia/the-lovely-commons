@@ -34,6 +34,20 @@ export interface Tag {
   itemIds: string[];
 }
 
+export type ItemCondition = 'excellent' | 'good' | 'fair' | 'poor';
+
+/**
+ * The lender's assessment of how the borrow went, captured when they confirm
+ * the return. It rates the *borrower* (and feeds their reputation), not the
+ * item.
+ */
+export interface LenderReturnFeedback {
+  rating?: number;
+  review?: string;
+  /** New item condition, only when the lender says it changed. */
+  condition?: ItemCondition;
+}
+
 export interface BorrowRequest {
   id: string;
   itemId: string;
@@ -45,9 +59,16 @@ export interface BorrowRequest {
   message?: string;
   createdAt: string;
   lastNudgedAt?: string; // When the borrower last sent a reminder to the lender
+  /**
+   * Two-sided handoff: user ids that have confirmed the pickup / return. The
+   * loan only advances once both the borrower and the lender are present.
+   * Requests persisted by older versions may lack these — read with `?? []`.
+   */
+  pickupConfirmedBy?: string[];
+  returnConfirmedBy?: string[];
+  /** Stashed when the lender confirms the return before the borrower does. */
+  lenderReturnFeedback?: LenderReturnFeedback;
 }
-
-export type ItemCondition = 'excellent' | 'good' | 'fair' | 'poor';
 
 export interface BorrowHistory {
   id: string;
@@ -57,8 +78,21 @@ export interface BorrowHistory {
   startDate: string;
   endDate: string;
   actualReturnDate?: string;
+  /**
+   * The borrower's review of the *item*. `reviewerId` is set (to the
+   * borrower's id) once the review is written, so display code never has to
+   * guess who wrote it. These drive `Item.rating`.
+   */
   rating?: number;
   review?: string;
+  reviewerId?: string;
+  reviewedAt?: string;
+  /**
+   * The lender's rating of the *borrower*, written at return time. These
+   * drive the borrower's `User.rating`.
+   */
+  borrowerRating?: number;
+  borrowerReview?: string;
   conditionBefore?: ItemCondition;
   conditionAfter?: ItemCondition;
 }
@@ -101,7 +135,22 @@ export interface WishlistItem {
 export interface Notification {
   id: string;
   userId: string;
-  type: 'borrow-request' | 'request-approved' | 'request-denied' | 'return-reminder' | 'item-returned' | 'friend-request' | 'friend-request-accepted' | 'friend-request-declined' | 'request-nudge' | 'wishlist-available';
+  type:
+    | 'borrow-request'
+    | 'request-approved'
+    | 'request-denied'
+    | 'request-cancelled'
+    | 'return-reminder'
+    | 'item-returned'
+    | 'pickup-confirmed'
+    | 'return-confirmed'
+    | 'review-request'
+    | 'item-reviewed'
+    | 'friend-request'
+    | 'friend-request-accepted'
+    | 'friend-request-declined'
+    | 'request-nudge'
+    | 'wishlist-available';
   title: string;
   message: string;
   read: boolean;

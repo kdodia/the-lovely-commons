@@ -44,7 +44,8 @@ The app uses a centralized Svelte store (`src/lib/store.ts`) with localStorage p
 - **Single source of truth**: `appStore` contains all application state (`AppState` type)
 - **Derived stores**: Computed values like `currentUser`, `currentUserItems`, `visibleItems`, `incomingRequests`, `approvedLoans`, `activeLoans`, etc.
 - **Action methods**: All state mutations go through store methods (e.g., `createBorrowRequest`, `updateItem`, `addToWishlist`). The raw writable `set`/`update` are intentionally not exported; tests use `appStore.replaceState()` to inject fixtures.
-- **ActionResult**: Lifecycle methods that can be rejected (`createBorrowRequest`, `approveRequest`, `denyRequest`, `markPickedUp`, `completeBorrow`, `nudgeRequest`) return `{ ok: true } | { ok: false; error }` so the UI can show the reason.
+- **ActionResult**: Methods that can be rejected (`createBorrowRequest`, `approveRequest`, `denyRequest`, `cancelRequest`, `confirmPickup`, `confirmReturn`, `submitItemReview`, `nudgeRequest`, `deleteItem`, `deleteTag`) return `{ ok: true } | { ok: false; error }` so the UI can show the reason. The acting user is always `state.currentUserId`; methods check that the actor is allowed (owner, borrower, lender, tag creator).
+- **Schema migration**: `migrateState()` in `store.ts` runs on every load and upgrades older persisted state (defaults the handoff arrays, moves legacy lender-written `rating`/`review` into `borrowerRating`/`borrowerReview`). Add a step there whenever a stored shape changes.
 - **Automatic persistence**: State automatically syncs to localStorage on every change
 - **Cross-tab sync**: Uses storage events to sync state across browser tabs
 - **Reset mechanism**: `appStore.reset()` or clear localStorage key `distributed-library-app-state`
@@ -65,9 +66,9 @@ The `canUserViewItem()` helper function in `store.ts` implements this logic. The
 
 - **Users** can be friends or close friends (stored in `friendIds` and `closeFriendIds` arrays)
 - **Items** belong to lenders, have categories, tags, and permission levels
-- **BorrowRequests** track the borrowing lifecycle: pending → approved (lender approves; item becomes unavailable) → active (lender marks picked up) → completed (lender marks returned; moves to history)
-- **BorrowHistory** stores completed borrows with ratings and condition tracking
-- **Tags** are user-created collections that reference item IDs (many-to-many)
+- **BorrowRequests** track the borrowing lifecycle: pending → approved (lender approves; item becomes unavailable) → active (both parties `confirmPickup`) → completed (both parties `confirmReturn`; moves to history). The borrower can `cancelRequest` while pending or approved; the lender can while approved. `pickupConfirmedBy` / `returnConfirmedBy` record who has confirmed each handoff; read them with `?? []`.
+- **BorrowHistory** stores completed borrows. Two separate ratings live on each entry: `borrowerRating`/`borrowerReview` are the lender's rating of the borrower (captured in the lender's return modal, folded into `User.rating`), and `rating`/`review`/`reviewerId` are the borrower's review of the item (written later via `submitItemReview`, averaged into `Item.rating`). Only entries with `reviewerId` are displayed as item reviews.
+- **Tags** are user-created collections that reference item IDs (many-to-many); `deleteItem` scrubs the item from every tag and wishlist and declines its pending requests
 - **Wishlist** allows users to subscribe to unavailable items with notifications
 - **Categories** are hierarchical with optional parent IDs
 
@@ -96,7 +97,7 @@ SvelteKit file-based routing:
 
 - `/` - Browse page (home) with search, filters, and item grid
 - `/items/[id]` - Item detail page with calendar, reviews, and borrow request form
-- `/dashboard` - Owner dashboard for managing requests and active loans
+- `/dashboard` - Incoming requests, my requests, Lending (items I've lent out) and Borrowing (items I'm holding) tabs with two-sided pickup/return confirmation
 - `/my-items` - User's item library
 - `/wishlist` - User's wishlist with availability notifications
 - `/network` - Friend management (tiers, promote/demote close friends, send/accept/decline friend requests)
@@ -152,6 +153,8 @@ This mock data is loaded into the store on first run if localStorage is empty.
 - **DateRangeCalendar.svelte**: Calendar widget for date selection with visual availability display
 - **FallbackImage.svelte**: Image component with error handling and fallback states
 - **Toast.svelte**: Toast notification component
+- **LoanCard.svelte**: A loan from either perspective (`lender` | `borrower`) with the handoff state ("waiting for X" vs "confirm on your side") and confirm/cancel actions
+- **FriendPicker.svelte**: Checkbox list of the current user's friends, used by the add/edit forms to fill `allowedUserIds` for `specific-users` items
 
 ## Working with the Codebase
 

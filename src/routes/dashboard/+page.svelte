@@ -1,15 +1,31 @@
 <script lang="ts">
-  import { appStore, incomingRequests, outgoingRequests, approvedLoans, activeLoans } from '$lib/store';
+  import {
+    appStore,
+    incomingRequests,
+    outgoingRequests,
+    approvedLoans,
+    activeLoans,
+    borrowedByMe
+  } from '$lib/store';
   import Toast from '$lib/components/Toast.svelte';
+  import LoanCard from '$lib/components/LoanCard.svelte';
   import { MAX_RATING, MIN_RATING, DEFAULT_RATING } from '$lib/constants';
-  import { formatDisplayDate, todayLocalISO } from '$lib/dates';
+  import { formatDisplayDate } from '$lib/dates';
   import { useToast } from '$lib/useToast.svelte';
   import type { ItemCondition } from '$lib/types';
 
-  let activeTab = $state<'incoming' | 'outgoing' | 'active'>('incoming');
+  type Tab = 'incoming' | 'outgoing' | 'lending' | 'borrowing';
+  let activeTab = $state<Tab>('incoming');
   const toaster = useToast();
 
-  // Return modal state
+  let lendingCount = $derived($approvedLoans.length + $activeLoans.length);
+  // Approved-then-active ordering keeps "pick up soon" above "on loan".
+  let lendingLoans = $derived([...$approvedLoans, ...$activeLoans]);
+  let borrowingLoans = $derived(
+    [...$borrowedByMe].sort((a, b) => (a.status === b.status ? 0 : a.status === 'approved' ? -1 : 1))
+  );
+
+  // Return modal state (lender side: rates the borrower, records condition)
   let showReturnModal = $state(false);
   let selectedLoanId = $state<string | null>(null);
   let returnRating = $state(DEFAULT_RATING);
@@ -25,6 +41,13 @@
     const loan = $activeLoans.find(l => l.id === selectedLoanId);
     if (!loan) return null;
     return $appStore.items.find(i => i.id === loan.itemId);
+  });
+
+  let selectedLoanBorrower = $derived.by(() => {
+    if (!selectedLoanId) return null;
+    const loan = $activeLoans.find(l => l.id === selectedLoanId);
+    if (!loan) return null;
+    return $appStore.users.find(u => u.id === loan.borrowerId);
   });
 
   const conditionLabels: Record<ItemCondition, { label: string; description: string }> = {
@@ -52,21 +75,54 @@
     }
   }
 
-  function markPickedUp(requestId: string) {
-    const result = appStore.markPickedUp(requestId);
+  function cancelRequest(requestId: string) {
+    const result = appStore.cancelRequest(requestId);
     if (result.ok) {
-      toaster.showToast('Loan started — marked as picked up', 'success');
+      toaster.showToast('Request cancelled', 'info');
     } else {
       toaster.showToast(result.error, 'error');
     }
   }
 
-  function markAsReturned(requestId: string) {
+  function confirmPickup(requestId: string) {
+    const before = $appStore.borrowRequests.find((r) => r.id === requestId);
+    const result = appStore.confirmPickup(requestId);
+    if (!result.ok) {
+      toaster.showToast(result.error, 'error');
+      return;
+    }
+    const after = $appStore.borrowRequests.find((r) => r.id === requestId);
+    if (after?.status === 'active') {
+      toaster.showToast('Both sides confirmed — the loan is now active', 'success');
+    } else {
+      const other = $appStore.users.find(
+        (u) => u.id === (before?.borrowerId === $appStore.currentUserId ? before?.lenderId : before?.borrowerId)
+      );
+      toaster.showToast(`Pickup confirmed — waiting for ${other?.name ?? 'the other party'}`, 'success');
+    }
+  }
+
+  /** Borrower side: no rating to give, confirm directly. */
+  function confirmReturnAsBorrower(requestId: string) {
+    const result = appStore.confirmReturn(requestId);
+    if (!result.ok) {
+      toaster.showToast(result.error, 'error');
+      return;
+    }
+    const after = $appStore.borrowRequests.find((r) => r.id === requestId);
+    if (after?.status === 'completed') {
+      toaster.showToast('Returned! Check your notifications to leave a review.', 'success');
+    } else {
+      toaster.showToast('Return confirmed — waiting for the lender to confirm too', 'success');
+    }
+  }
+
+  /** Lender side: open the modal to rate the borrower and note the condition. */
+  function openReturnModal(requestId: string) {
     selectedLoanId = requestId;
     returnRating = DEFAULT_RATING;
     returnReview = '';
     conditionChanged = false;
-    // Initialize newCondition to current item condition
     const loan = $activeLoans.find(l => l.id === requestId);
     if (loan) {
       const item = $appStore.items.find(i => i.id === loan.itemId);
@@ -86,25 +142,29 @@
       return;
     }
 
-    // Pass condition only if it was changed
-    const conditionToUpdate = conditionChanged ? newCondition : undefined;
-    const result = appStore.completeBorrow(selectedLoanId, returnRating, returnReview, conditionToUpdate);
+    const requestId = selectedLoanId;
+    const result = appStore.confirmReturn(requestId, {
+      rating: returnRating,
+      review: returnReview,
+      // Pass condition only if it was changed
+      condition: conditionChanged ? newCondition : undefined
+    });
     if (!result.ok) {
       toaster.showToast(result.error, 'error');
       return;
     }
 
-    const message = conditionChanged
-      ? `Item marked as returned! Condition updated to ${conditionLabels[newCondition].label}.`
-      : 'Item marked as returned!';
-    toaster.showToast(message, 'success');
+    const after = $appStore.borrowRequests.find((r) => r.id === requestId);
+    const conditionNote = conditionChanged
+      ? ` Condition updated to ${conditionLabels[newCondition].label}.`
+      : '';
+    if (after?.status === 'completed') {
+      toaster.showToast(`Return complete!${conditionNote}`, 'success');
+    } else {
+      toaster.showToast(`Return confirmed — waiting for the borrower to confirm too.${conditionNote}`, 'success');
+    }
 
-    // Reset modal state
-    showReturnModal = false;
-    selectedLoanId = null;
-    returnRating = DEFAULT_RATING;
-    returnReview = '';
-    conditionChanged = false;
+    cancelReturn();
   }
 
   function cancelReturn() {
@@ -135,7 +195,7 @@
     <header class="page-header">
       <div>
         <h1 class="page-title">Dashboard</h1>
-        <p class="page-subtitle">Manage your lending activity</p>
+        <p class="page-subtitle">Manage what you're lending and borrowing</p>
       </div>
     </header>
 
@@ -146,6 +206,7 @@
         class:active={activeTab === 'incoming'}
         aria-selected={activeTab === 'incoming'}
         aria-controls="incoming-panel"
+        aria-label="Incoming Requests"
         id="incoming-tab"
         onclick={() => (activeTab = 'incoming')}
       >
@@ -162,6 +223,7 @@
         class:active={activeTab === 'outgoing'}
         aria-selected={activeTab === 'outgoing'}
         aria-controls="outgoing-panel"
+        aria-label="My Requests"
         id="outgoing-tab"
         onclick={() => (activeTab = 'outgoing')}
       >
@@ -172,23 +234,41 @@
       <button
         role="tab"
         class="tab"
-        class:active={activeTab === 'active'}
-        aria-selected={activeTab === 'active'}
-        aria-controls="active-panel"
-        id="active-tab"
-        onclick={() => (activeTab = 'active')}
+        class:active={activeTab === 'lending'}
+        aria-selected={activeTab === 'lending'}
+        aria-controls="lending-panel"
+        aria-label="Lending"
+        id="lending-tab"
+        onclick={() => (activeTab = 'lending')}
       >
-        <span aria-hidden="true">🔄</span>
-        <span>Active Loans</span>
-        {#if $approvedLoans.length + $activeLoans.length > 0}
-          <span class="tab-badge" aria-label="{$approvedLoans.length + $activeLoans.length} loans">{$approvedLoans.length + $activeLoans.length}</span>
+        <span aria-hidden="true">🤝</span>
+        <span>Lending</span>
+        {#if lendingCount > 0}
+          <span class="tab-badge" aria-label="{lendingCount} items lent out">{lendingCount}</span>
+        {/if}
+      </button>
+
+      <button
+        role="tab"
+        class="tab"
+        class:active={activeTab === 'borrowing'}
+        aria-selected={activeTab === 'borrowing'}
+        aria-controls="borrowing-panel"
+        aria-label="Borrowing"
+        id="borrowing-tab"
+        onclick={() => (activeTab = 'borrowing')}
+      >
+        <span aria-hidden="true">🎒</span>
+        <span>Borrowing</span>
+        {#if borrowingLoans.length > 0}
+          <span class="tab-badge" aria-label="{borrowingLoans.length} items borrowed">{borrowingLoans.length}</span>
         {/if}
       </button>
     </div>
 
     <div class="tab-content">
       {#if activeTab === 'incoming'}
-        <div class="requests-list">
+        <div class="requests-list" id="incoming-panel" role="tabpanel" aria-labelledby="incoming-tab">
           {#if $incomingRequests.length === 0}
             <div class="empty-state">
               <span class="empty-icon" aria-hidden="true">📬</span>
@@ -196,7 +276,7 @@
               <p>When people request to borrow your items, they'll appear here</p>
             </div>
           {:else}
-            {#each $incomingRequests as request}
+            {#each $incomingRequests as request (request.id)}
               {@const item = $appStore.items.find((i) => i.id === request.itemId)}
               {@const borrower = $appStore.users.find((u) => u.id === request.borrowerId)}
               <div class="request-card card">
@@ -243,7 +323,7 @@
           {/if}
         </div>
       {:else if activeTab === 'outgoing'}
-        <div class="requests-list">
+        <div class="requests-list" id="outgoing-panel" role="tabpanel" aria-labelledby="outgoing-tab">
           {#if $outgoingRequests.length === 0}
             <div class="empty-state">
               <span class="empty-icon" aria-hidden="true">📦</span>
@@ -251,7 +331,7 @@
               <p>Requests you make to borrow items will appear here</p>
             </div>
           {:else}
-            {#each $outgoingRequests as request}
+            {#each $outgoingRequests as request (request.id)}
               {@const item = $appStore.items.find((i) => i.id === request.itemId)}
               {@const lender = $appStore.users.find((u) => u.id === request.lenderId)}
               <div class="request-card card">
@@ -261,7 +341,7 @@
                   </a>
                   <div class="request-details">
                     <a href="/items/{item?.id}" class="request-title-link">
-                      <h3 class="request-title">{item?.name}</h3>
+                      <h3 class="request-title">{item?.name ?? 'Removed item'}</h3>
                     </a>
                     <div class="request-meta">
                       <span>Requested from</span>
@@ -293,95 +373,68 @@
                     </div>
                   </div>
                 </div>
+                {#if request.status === 'pending'}
+                  <div class="request-actions">
+                    <button class="btn btn-secondary" onclick={() => cancelRequest(request.id)}>
+                      Cancel Request
+                    </button>
+                  </div>
+                {:else if request.status === 'approved' || request.status === 'active'}
+                  <div class="request-actions">
+                    <button class="btn btn-secondary" onclick={() => (activeTab = 'borrowing')}>
+                      Manage in Borrowing
+                    </button>
+                  </div>
+                {/if}
               </div>
             {/each}
           {/if}
         </div>
-      {:else if activeTab === 'active'}
-        <div class="requests-list">
-          {#if $approvedLoans.length === 0 && $activeLoans.length === 0}
+      {:else if activeTab === 'lending'}
+        <div class="requests-list" id="lending-panel" role="tabpanel" aria-labelledby="lending-tab">
+          {#if lendingLoans.length === 0}
             <div class="empty-state">
               <span class="empty-icon" aria-hidden="true">📋</span>
-              <h3>No active loans</h3>
-              <p>Items currently borrowed from you will appear here</p>
+              <h3>Nothing lent out right now</h3>
+              <p>Items you've approved for borrowing will appear here</p>
             </div>
           {:else}
-            {#each $approvedLoans as loan}
-              {@const item = $appStore.items.find((i) => i.id === loan.itemId)}
-              {@const borrower = $appStore.users.find((u) => u.id === loan.borrowerId)}
-              <div class="request-card card">
-                <div class="request-content">
-                  <a href="/items/{loan.itemId}" class="request-item-link">
-                    <img src={item?.imageUrl} alt={item?.name} class="request-item-image" />
-                  </a>
-                  <div class="request-details">
-                    <a href="/items/{loan.itemId}" class="request-title-link">
-                      <h3 class="request-title">{item?.name}</h3>
-                    </a>
-                    <div class="request-meta">
-                      <span>Reserved for</span>
-                      <a href="/profile/{borrower?.id}" class="user-link">
-                        <img
-                          src={borrower?.profilePic}
-                          alt={borrower?.name}
-                          class="borrower-avatar"
-                        />
-                        <span class="borrower-name">{borrower?.name}</span>
-                      </a>
-                    </div>
-                    <div class="request-dates">
-                      <span aria-hidden="true">📅</span>
-                      <span>{formatDisplayDate(loan.startDate)} - {formatDisplayDate(loan.endDate)}</span>
-                    </div>
-                    <div class="status-badge-inline">
-                      <span class="badge badge-warning">⏳ Awaiting pickup</span>
-                    </div>
-                  </div>
-                </div>
-                <div class="request-actions">
-                  <button class="btn btn-primary" onclick={() => markPickedUp(loan.id)}>
-                    Mark as Picked Up
-                  </button>
-                </div>
-              </div>
+            <p class="panel-hint">
+              Pickups and returns need a confirmation from both of you, so the app reflects who
+              actually has the item.
+            </p>
+            {#each lendingLoans as loan (loan.id)}
+              <LoanCard
+                request={loan}
+                perspective="lender"
+                onConfirmPickup={confirmPickup}
+                onConfirmReturn={openReturnModal}
+                onCancel={cancelRequest}
+              />
             {/each}
-            {#each $activeLoans as loan}
-              {@const item = $appStore.items.find((i) => i.id === loan.itemId)}
-              {@const borrower = $appStore.users.find((u) => u.id === loan.borrowerId)}
-              <div class="request-card card">
-                <div class="request-content">
-                  <a href="/items/{item?.id}" class="request-item-link">
-                    <img src={item?.imageUrl} alt={item?.name} class="request-item-image" />
-                  </a>
-                  <div class="request-details">
-                    <a href="/items/{item?.id}" class="request-title-link">
-                      <h3 class="request-title">{item?.name}</h3>
-                    </a>
-                    <div class="request-meta">
-                      <span>Borrowed by</span>
-                      <a href="/profile/{borrower?.id}" class="user-link">
-                        <img
-                          src={borrower?.profilePic}
-                          alt={borrower?.name}
-                          class="borrower-avatar"
-                        />
-                        <span class="borrower-name">{borrower?.name}</span>
-                      </a>
-                    </div>
-                    <div class="request-dates">
-                      <span aria-hidden="true">📅</span>
-                      <span class:overdue={loan.endDate < todayLocalISO()}
-                        >Return by: {formatDisplayDate(loan.endDate)}</span
-                      >
-                    </div>
-                  </div>
-                </div>
-                <div class="request-actions">
-                  <button class="btn btn-primary" onclick={() => markAsReturned(loan.id)}>
-                    Mark as Returned
-                  </button>
-                </div>
-              </div>
+          {/if}
+        </div>
+      {:else if activeTab === 'borrowing'}
+        <div class="requests-list" id="borrowing-panel" role="tabpanel" aria-labelledby="borrowing-tab">
+          {#if borrowingLoans.length === 0}
+            <div class="empty-state">
+              <span class="empty-icon" aria-hidden="true">🎒</span>
+              <h3>You're not borrowing anything</h3>
+              <p>Approved requests and items you're holding will appear here</p>
+            </div>
+          {:else}
+            <p class="panel-hint">
+              Confirm when you pick an item up and again when you hand it back — the lender
+              confirms on their side too.
+            </p>
+            {#each borrowingLoans as loan (loan.id)}
+              <LoanCard
+                request={loan}
+                perspective="borrower"
+                onConfirmPickup={confirmPickup}
+                onConfirmReturn={confirmReturnAsBorrower}
+                onCancel={cancelRequest}
+              />
             {/each}
           {/if}
         </div>
@@ -395,14 +448,15 @@
   <div class="modal-overlay" onclick={cancelReturn} onkeydown={handleModalKeydown} role="presentation">
     <div class="modal-content" bind:this={returnModalElement} onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="return-modal-title" tabindex="-1">
       <div class="modal-header">
-        <h2 id="return-modal-title">Mark Item as Returned</h2>
+        <h2 id="return-modal-title">Confirm Return</h2>
         <button class="modal-close" onclick={cancelReturn} aria-label="Close modal">✕</button>
       </div>
 
       <div class="modal-body">
         <div class="form-group">
           <!-- svelte-ignore a11y_label_has_associated_control - Label is associated with radiogroup via aria-labelledby -->
-          <label id="rating-label">How was the experience?</label>
+          <label id="rating-label">How was lending to {selectedLoanBorrower?.name ?? 'this borrower'}?</label>
+          <p class="modal-hint">This rates the borrower, not the item — they'll be asked to review the item separately.</p>
           <div class="star-rating" role="radiogroup" aria-labelledby="rating-label">
             {#each [1, 2, 3, 4, 5] as star}
               <button
@@ -423,12 +477,12 @@
         </div>
 
         <div class="form-group">
-          <label for="review">Review (optional)</label>
+          <label for="review">Note (optional)</label>
           <textarea
             id="review"
             bind:value={returnReview}
-            placeholder="Share your experience with this item..."
-            rows="4"
+            placeholder="Returned on time? Good communication?"
+            rows="3"
           ></textarea>
         </div>
 
@@ -491,7 +545,7 @@
 
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick={cancelReturn}>Cancel</button>
-        <button class="btn btn-primary" onclick={submitReturn}>Complete Return</button>
+        <button class="btn btn-primary" onclick={submitReturn}>Confirm Return</button>
       </div>
     </div>
   </div>
@@ -564,6 +618,18 @@
     display: flex;
     flex-direction: column;
     gap: 1rem;
+  }
+
+  .panel-hint {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+  }
+
+  .modal-hint {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
   }
 
   .request-card {
@@ -668,11 +734,6 @@
     gap: 0.5rem;
     font-size: 0.875rem;
     color: var(--text-secondary);
-  }
-
-  .request-dates .overdue {
-    color: var(--error);
-    font-weight: 600;
   }
 
   .request-message {

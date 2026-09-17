@@ -10,9 +10,12 @@ import {
 	incomingRequests,
 	outgoingRequests,
 	activeLoans,
-	visibleItems
+	borrowedByMe,
+	visibleItems,
+	hasConfirmed,
+	pendingItemReviews
 } from './store';
-import type { AppState, Item, User, BorrowRequest } from './types';
+import type { AppState, Item, User, BorrowRequest, BorrowHistory, Tag } from './types';
 
 // Helper to create a minimal test state
 function createTestState(overrides: Partial<AppState> = {}): AppState {
@@ -296,14 +299,24 @@ describe('appStore actions', () => {
 	});
 
 	describe('deleteItem', () => {
-		it('removes an item from the store', () => {
-			const item = createTestItem();
+		it('removes an item the current user owns', () => {
+			const item = createTestItem({ lenderId: 'user1' });
 			appStore.replaceState(createTestState({ items: [item] }));
 
-			appStore.deleteItem('item1');
+			expect(appStore.deleteItem('item1')).toEqual({ ok: true });
+			expect(get(appStore).items).toHaveLength(0);
+		});
 
-			const state = get(appStore);
-			expect(state.items).toHaveLength(0);
+		it('refuses to delete someone else\'s item', () => {
+			appStore.replaceState(createTestState({ items: [createTestItem({ lenderId: 'user2' })] }));
+
+			const result = appStore.deleteItem('item1');
+			expect(result.ok).toBe(false);
+			expect(get(appStore).items).toHaveLength(1);
+		});
+
+		it('returns an error for an unknown item', () => {
+			expect(appStore.deleteItem('nope').ok).toBe(false);
 		});
 	});
 
@@ -382,8 +395,8 @@ describe('appStore actions', () => {
 		});
 	});
 
-	describe('completeBorrow', () => {
-		it('completes borrow and adds to history', () => {
+	describe('confirmReturn', () => {
+		function activeLoanState() {
 			const item = createTestItem({ lenderId: 'user2', rating: 4.0 });
 			const request: BorrowRequest = {
 				id: 'req1',
@@ -393,39 +406,84 @@ describe('appStore actions', () => {
 				startDate: '2024-01-15',
 				endDate: '2024-01-20',
 				status: 'active',
+				pickupConfirmedBy: ['user1', 'user2'],
 				createdAt: new Date().toISOString()
 			};
-			appStore.replaceState(createTestState({ items: [item], borrowRequests: [request] }));
+			return createTestState({ items: [item], borrowRequests: [request] });
+		}
 
-			appStore.completeBorrow('req1', 5, 'Great item!');
+		it('completes the borrow once both sides confirm and records the lender feedback', () => {
+			appStore.replaceState(activeLoanState());
+
+			appStore.setCurrentUser('user2');
+			expect(appStore.confirmReturn('req1', { rating: 5, review: 'Great borrower!' })).toEqual({ ok: true });
+			expect(get(appStore).borrowRequests[0].status).toBe('active');
+			expect(get(appStore).borrowHistory).toHaveLength(0);
+
+			appStore.setCurrentUser('user1');
+			expect(appStore.confirmReturn('req1')).toEqual({ ok: true });
 
 			const state = get(appStore);
 			expect(state.borrowRequests[0].status).toBe('completed');
 			expect(state.borrowHistory).toHaveLength(1);
-			expect(state.borrowHistory[0].rating).toBe(5);
-			expect(state.borrowHistory[0].review).toBe('Great item!');
+			expect(state.borrowHistory[0].borrowerRating).toBe(5);
+			expect(state.borrowHistory[0].borrowerReview).toBe('Great borrower!');
+			// No item review yet — that's the borrower's job
+			expect(state.borrowHistory[0].rating).toBeUndefined();
+			expect(state.borrowHistory[0].reviewerId).toBeUndefined();
 			expect(state.items[0].available).toBe(true);
 		});
 
-		it('updates item rating based on history', () => {
-			const item = createTestItem({ lenderId: 'user2', rating: 4.0 });
-			const request: BorrowRequest = {
-				id: 'req1',
-				itemId: 'item1',
-				borrowerId: 'user1',
-				lenderId: 'user2',
-				startDate: '2024-01-15',
-				endDate: '2024-01-20',
-				status: 'active',
-				createdAt: new Date().toISOString()
-			};
-			appStore.replaceState(createTestState({ items: [item], borrowRequests: [request] }));
+		it('leaves the item rating alone until a borrower reviews it', () => {
+			appStore.replaceState(activeLoanState());
 
-			appStore.completeBorrow('req1', 5, 'Perfect!');
+			appStore.setCurrentUser('user2');
+			appStore.confirmReturn('req1', { rating: 5 });
+			appStore.setCurrentUser('user1');
+			appStore.confirmReturn('req1');
+
+			expect(get(appStore).items[0].rating).toBe(4.0);
+		});
+
+		it('folds the lender rating into the borrower reputation', () => {
+			appStore.replaceState(activeLoanState());
+			// user1 starts at 4.5 over 10 borrows; one 5 → (45 + 5) / 11 ≈ 4.5, one 1 → 4.2
+			appStore.setCurrentUser('user2');
+			appStore.confirmReturn('req1', { rating: 1 });
+			appStore.setCurrentUser('user1');
+			appStore.confirmReturn('req1');
+
+			const borrower = get(appStore).users.find((u) => u.id === 'user1');
+			expect(borrower?.rating).toBe(4.2);
+			expect(borrower?.totalBorrows).toBe(11);
+		});
+
+		it('asks the borrower to review the item once the return completes', () => {
+			appStore.replaceState(activeLoanState());
+			appStore.setCurrentUser('user1');
+			appStore.confirmReturn('req1');
+			expect(get(appStore).notifications.filter((n) => n.type === 'review-request')).toHaveLength(0);
+
+			appStore.setCurrentUser('user2');
+			appStore.confirmReturn('req1', { rating: 5 });
+
+			const prompts = get(appStore).notifications.filter((n) => n.type === 'review-request');
+			expect(prompts).toHaveLength(1);
+			expect(prompts[0].userId).toBe('user1');
+			expect(prompts[0].relatedId).toBe('item1');
+		});
+
+		it('keeps the lender feedback even when the lender confirms first', () => {
+			appStore.replaceState(activeLoanState());
+			appStore.setCurrentUser('user2');
+			appStore.confirmReturn('req1', { rating: 3, condition: 'fair' });
+			appStore.setCurrentUser('user1');
+			appStore.confirmReturn('req1', { rating: 5 }); // borrower's "feedback" is ignored
 
 			const state = get(appStore);
-			// Rating should be updated (single 5-star rating = 5.0)
-			expect(state.items[0].rating).toBe(5);
+			expect(state.borrowHistory[0].borrowerRating).toBe(3);
+			expect(state.borrowHistory[0].conditionAfter).toBe('fair');
+			expect(state.items[0].condition).toBe('fair');
 		});
 	});
 
@@ -707,6 +765,31 @@ function createLifecycleRequest(overrides: Partial<BorrowRequest> = {}): BorrowR
 	};
 }
 
+/** Confirm a handoff step from both parties, restoring the current user afterwards. */
+function confirmBothSides(
+	step: 'pickup' | 'return',
+	requestId: string,
+	lenderFeedback: { rating?: number; review?: string } = { rating: 5 }
+) {
+	const before = get(appStore);
+	const request = before.borrowRequests.find((r) => r.id === requestId);
+	if (!request) throw new Error(`no request ${requestId}`);
+	const original = before.currentUserId;
+
+	appStore.setCurrentUser(request.lenderId);
+	const lenderResult =
+		step === 'pickup'
+			? appStore.confirmPickup(requestId)
+			: appStore.confirmReturn(requestId, lenderFeedback);
+	appStore.setCurrentUser(request.borrowerId);
+	const borrowerResult =
+		step === 'pickup' ? appStore.confirmPickup(requestId) : appStore.confirmReturn(requestId);
+	appStore.setCurrentUser(original);
+
+	if (!lenderResult.ok) return lenderResult;
+	return borrowerResult;
+}
+
 describe('borrow lifecycle', () => {
 	beforeEach(() => {
 		appStore.replaceState(
@@ -723,11 +806,11 @@ describe('borrow lifecycle', () => {
 		expect(state.borrowRequests[0].status).toBe('approved');
 		expect(state.items[0].available).toBe(false);
 
-		expect(appStore.markPickedUp('req1').ok).toBe(true);
+		expect(confirmBothSides('pickup', 'req1').ok).toBe(true);
 		state = get(appStore);
 		expect(state.borrowRequests[0].status).toBe('active');
 
-		expect(appStore.completeBorrow('req1', 5, 'Great!').ok).toBe(true);
+		expect(confirmBothSides('return', 'req1', { rating: 5, review: 'Great!' }).ok).toBe(true);
 		state = get(appStore);
 		expect(state.borrowRequests[0].status).toBe('completed');
 		expect(state.items[0].available).toBe(true);
@@ -791,7 +874,7 @@ describe('borrow lifecycle', () => {
 			})
 		);
 
-		expect(appStore.completeBorrow('req-a', 5, '').ok).toBe(true);
+		expect(confirmBothSides('return', 'req-a').ok).toBe(true);
 		expect(get(appStore).items[0].available).toBe(false);
 	});
 
@@ -803,7 +886,7 @@ describe('borrow lifecycle', () => {
 			})
 		);
 
-		appStore.completeBorrow('req1', 5, '');
+		confirmBothSides('return', 'req1');
 		const state = get(appStore);
 		expect(state.items[0].totalBorrows).toBe(6);
 		expect(state.users.find((u) => u.id === 'user1')?.totalBorrows).toBe(11);
@@ -959,7 +1042,7 @@ describe('wishlist regressions', () => {
 			})
 		);
 
-		appStore.completeBorrow('req1', 5, '');
+		confirmBothSides('return', 'req1');
 		const notifications = get(appStore).notifications.filter((n) => n.type === 'wishlist-available');
 		expect(notifications).toHaveLength(1);
 		expect(notifications[0].userId).toBe('user3');
@@ -983,7 +1066,7 @@ describe('wishlist regressions', () => {
 			})
 		);
 
-		appStore.completeBorrow('req1', 5, '');
+		confirmBothSides('return', 'req1');
 		expect(get(appStore).notifications.filter((n) => n.type === 'wishlist-available')).toHaveLength(0);
 	});
 
@@ -1004,7 +1087,7 @@ describe('wishlist regressions', () => {
 			})
 		);
 
-		appStore.completeBorrow('req1', 5, '');
+		confirmBothSides('return', 'req1');
 		expect(get(appStore).notifications.filter((n) => n.type === 'wishlist-available')).toHaveLength(0);
 	});
 });
@@ -1021,6 +1104,361 @@ describe('getCategoryPath cycle guard', () => {
 		// Before the fix this looped forever
 		const path = getCategoryPath('catA', state);
 		expect(path).toEqual(['B', 'A']);
+	});
+});
+
+describe('item deletion cleanup', () => {
+	function stateWithItem(requests: BorrowRequest[] = []) {
+		return createTestState({
+			items: [createTestItem({ lenderId: 'user1' })],
+			tags: [{ id: 'tag1', name: 'Kitchen', createdBy: 'user1', itemIds: ['item1', 'other'] }],
+			wishlist: [
+				{ id: 'w1', userId: 'user2', itemId: 'item1', notifyOnAvailable: true, addedAt: '2024-01-01T00:00:00Z' },
+				{ id: 'w2', userId: 'user2', itemId: 'other', notifyOnAvailable: true, addedAt: '2024-01-01T00:00:00Z' }
+			],
+			borrowRequests: requests
+		});
+	}
+
+	it('is blocked while the item is reserved or on loan', () => {
+		for (const status of ['approved', 'active'] as const) {
+			appStore.replaceState(
+				stateWithItem([createLifecycleRequest({ borrowerId: 'user2', lenderId: 'user1', status })])
+			);
+			const result = appStore.deleteItem('item1');
+			expect(result.ok).toBe(false);
+			expect(get(appStore).items).toHaveLength(1);
+		}
+	});
+
+	it('scrubs the item from tags and wishlists', () => {
+		appStore.replaceState(stateWithItem());
+		expect(appStore.deleteItem('item1').ok).toBe(true);
+
+		const state = get(appStore);
+		expect(state.tags[0].itemIds).toEqual(['other']);
+		expect(state.wishlist.map((w) => w.id)).toEqual(['w2']);
+	});
+
+	it('declines outstanding pending requests and tells each requester', () => {
+		appStore.replaceState(
+			stateWithItem([
+				createLifecycleRequest({ id: 'p1', borrowerId: 'user2', lenderId: 'user1' }),
+				createLifecycleRequest({ id: 'p2', borrowerId: 'user3', lenderId: 'user1', startDate: '2030-03-01', endDate: '2030-03-02' }),
+				createLifecycleRequest({ id: 'done', borrowerId: 'user3', lenderId: 'user1', status: 'completed' })
+			])
+		);
+		expect(appStore.deleteItem('item1').ok).toBe(true);
+
+		const state = get(appStore);
+		expect(state.borrowRequests.find((r) => r.id === 'p1')?.status).toBe('denied');
+		expect(state.borrowRequests.find((r) => r.id === 'p2')?.status).toBe('denied');
+		expect(state.borrowRequests.find((r) => r.id === 'done')?.status).toBe('completed');
+		const denials = state.notifications.filter((n) => n.type === 'request-denied');
+		expect(denials.map((n) => n.userId).sort()).toEqual(['user2', 'user3']);
+	});
+});
+
+describe('tag management', () => {
+	const tag: Tag = { id: 'tag1', name: 'Old Name', createdBy: 'user1', itemIds: ['item1'] };
+
+	beforeEach(() => {
+		appStore.replaceState(createTestState({ tags: [tag] }));
+	});
+
+	it('renames a tag', () => {
+		appStore.updateTag('tag1', { name: 'New Name' });
+		expect(get(appStore).tags[0].name).toBe('New Name');
+		expect(get(appStore).tags[0].itemIds).toEqual(['item1']);
+	});
+
+	it('deletes a tag the current user created', () => {
+		expect(appStore.deleteTag('tag1')).toEqual({ ok: true });
+		expect(get(appStore).tags).toHaveLength(0);
+	});
+
+	it('refuses to delete another user\'s tag', () => {
+		appStore.setCurrentUser('user2');
+		expect(appStore.deleteTag('tag1').ok).toBe(false);
+		expect(get(appStore).tags).toHaveLength(1);
+	});
+
+	it('reports an unknown tag', () => {
+		expect(appStore.deleteTag('missing').ok).toBe(false);
+	});
+});
+
+describe('specific-users items', () => {
+	it('are visible only to the hand-picked users (and the owner)', () => {
+		appStore.replaceState(createTestState({ currentUserId: 'user2' }));
+		appStore.addItem(
+			createTestItem({ lenderId: 'user2', permissionLevel: 'specific-users', allowedUserIds: ['user3'] })
+		);
+
+		// owner
+		expect(get(visibleItems)).toHaveLength(1);
+		// allowed
+		appStore.setCurrentUser('user3');
+		expect(get(visibleItems)).toHaveLength(1);
+		// a close friend who wasn't picked
+		appStore.setCurrentUser('user1');
+		expect(get(visibleItems)).toHaveLength(0);
+	});
+
+	it('hide from everyone but the owner when nobody is picked', () => {
+		appStore.replaceState(createTestState({ currentUserId: 'user2' }));
+		appStore.addItem(createTestItem({ lenderId: 'user2', permissionLevel: 'specific-users', allowedUserIds: [] }));
+		appStore.setCurrentUser('user1');
+		expect(get(visibleItems)).toHaveLength(0);
+	});
+});
+
+describe('borrowedByMe', () => {
+	it('returns approved and active loans where the current user is the borrower', () => {
+		appStore.replaceState(
+			createTestState({
+				borrowRequests: [
+					createLifecycleRequest({ id: 'mine-approved', status: 'approved' }),
+					createLifecycleRequest({ id: 'mine-active', status: 'active' }),
+					createLifecycleRequest({ id: 'mine-pending', status: 'pending' }),
+					createLifecycleRequest({ id: 'mine-done', status: 'completed' }),
+					createLifecycleRequest({ id: 'theirs', status: 'active', borrowerId: 'user3', lenderId: 'user1' })
+				]
+			})
+		);
+
+		expect(get(borrowedByMe).map((r) => r.id).sort()).toEqual(['mine-active', 'mine-approved']);
+		// and the lender-side stores don't leak the borrower's loans
+		expect(get(activeLoans).map((r) => r.id)).toEqual(['theirs']);
+	});
+});
+
+describe('two-sided pickup', () => {
+	beforeEach(() => {
+		appStore.replaceState(
+			createTestState({
+				items: [createTestItem({ lenderId: 'user2', available: false })],
+				borrowRequests: [createLifecycleRequest({ status: 'approved' })]
+			})
+		);
+	});
+
+	it('does not advance on a single confirmation', () => {
+		expect(appStore.confirmPickup('req1')).toEqual({ ok: true });
+		const request = get(appStore).borrowRequests[0];
+		expect(request.status).toBe('approved');
+		expect(request.pickupConfirmedBy).toEqual(['user1']);
+		expect(hasConfirmed(request, 'pickup', 'user1')).toBe(true);
+		expect(hasConfirmed(request, 'pickup', 'user2')).toBe(false);
+	});
+
+	it('nudges the other party after the first confirmation', () => {
+		appStore.confirmPickup('req1');
+		const notes = get(appStore).notifications.filter((n) => n.type === 'pickup-confirmed');
+		expect(notes).toHaveLength(1);
+		expect(notes[0].userId).toBe('user2');
+		expect(notes[0].message).toContain('confirm on your side');
+	});
+
+	it('activates the loan once both parties confirm, in either order', () => {
+		appStore.setCurrentUser('user2');
+		appStore.confirmPickup('req1');
+		appStore.setCurrentUser('user1');
+		appStore.confirmPickup('req1');
+		expect(get(appStore).borrowRequests[0].status).toBe('active');
+	});
+
+	it('rejects users who are not party to the loan', () => {
+		appStore.setCurrentUser('user3');
+		expect(appStore.confirmPickup('req1').ok).toBe(false);
+		expect(get(appStore).borrowRequests[0].pickupConfirmedBy ?? []).toHaveLength(0);
+	});
+
+	it('rejects confirming twice from the same side', () => {
+		expect(appStore.confirmPickup('req1').ok).toBe(true);
+		expect(appStore.confirmPickup('req1').ok).toBe(false);
+		expect(get(appStore).borrowRequests[0].pickupConfirmedBy).toEqual(['user1']);
+	});
+
+	it('rejects pickup on a request that is not approved', () => {
+		appStore.replaceState(
+			createTestState({ borrowRequests: [createLifecycleRequest({ status: 'pending' })] })
+		);
+		expect(appStore.confirmPickup('req1').ok).toBe(false);
+	});
+
+	it('treats legacy requests without confirmation arrays as unconfirmed', () => {
+		const legacy = createLifecycleRequest({ status: 'approved' });
+		delete legacy.pickupConfirmedBy;
+		delete legacy.returnConfirmedBy;
+		appStore.replaceState(createTestState({ borrowRequests: [legacy] }));
+
+		expect(hasConfirmed(legacy, 'pickup', 'user1')).toBe(false);
+		expect(appStore.confirmPickup('req1').ok).toBe(true);
+		expect(get(appStore).borrowRequests[0].pickupConfirmedBy).toEqual(['user1']);
+	});
+});
+
+describe('two-sided return', () => {
+	beforeEach(() => {
+		appStore.replaceState(
+			createTestState({
+				items: [createTestItem({ lenderId: 'user2', available: false })],
+				borrowRequests: [createLifecycleRequest({ status: 'active', pickupConfirmedBy: ['user1', 'user2'] })]
+			})
+		);
+	});
+
+	it('does not complete on a single confirmation', () => {
+		expect(appStore.confirmReturn('req1')).toEqual({ ok: true });
+		const state = get(appStore);
+		expect(state.borrowRequests[0].status).toBe('active');
+		expect(state.borrowHistory).toHaveLength(0);
+		expect(state.items[0].available).toBe(false);
+		const notes = state.notifications.filter((n) => n.type === 'return-confirmed');
+		expect(notes.map((n) => n.userId)).toEqual(['user2']);
+	});
+
+	it('rejects non-parties and double confirmations', () => {
+		appStore.setCurrentUser('user3');
+		expect(appStore.confirmReturn('req1').ok).toBe(false);
+		appStore.setCurrentUser('user1');
+		expect(appStore.confirmReturn('req1').ok).toBe(true);
+		expect(appStore.confirmReturn('req1').ok).toBe(false);
+	});
+
+	it('rejects a return on a loan that is not active', () => {
+		appStore.replaceState(
+			createTestState({ borrowRequests: [createLifecycleRequest({ status: 'approved' })] })
+		);
+		expect(appStore.confirmReturn('req1').ok).toBe(false);
+	});
+
+	it('rejects an out-of-range lender rating', () => {
+		appStore.setCurrentUser('user2');
+		expect(appStore.confirmReturn('req1', { rating: 9 }).ok).toBe(false);
+		expect(get(appStore).borrowRequests[0].returnConfirmedBy ?? []).toHaveLength(0);
+	});
+});
+
+describe('submitItemReview', () => {
+	const completed: BorrowHistory = {
+		id: 'hist1',
+		itemId: 'item1',
+		borrowerId: 'user1',
+		lenderId: 'user2',
+		startDate: '2024-01-01',
+		endDate: '2024-01-03',
+		borrowerRating: 5
+	};
+
+	beforeEach(() => {
+		appStore.replaceState(
+			createTestState({
+				items: [createTestItem({ lenderId: 'user2', rating: 4.0 })],
+				borrowHistory: [completed]
+			})
+		);
+	});
+
+	it('lets the borrower review once and recomputes the item rating from borrower reviews', () => {
+		expect(pendingItemReviews(get(appStore), 'item1', 'user1')).toHaveLength(1);
+
+		expect(appStore.submitItemReview('hist1', 3, '  Works, but loud.  ')).toEqual({ ok: true });
+
+		const state = get(appStore);
+		const entry = state.borrowHistory[0];
+		expect(entry.rating).toBe(3);
+		expect(entry.review).toBe('Works, but loud.');
+		expect(entry.reviewerId).toBe('user1');
+		expect(entry.reviewedAt).toBeTruthy();
+		// The lender's rating of the borrower is untouched
+		expect(entry.borrowerRating).toBe(5);
+		// Item rating now comes from borrower reviews only
+		expect(state.items[0].rating).toBe(3);
+		expect(pendingItemReviews(state, 'item1', 'user1')).toHaveLength(0);
+
+		// Second attempt is refused
+		expect(appStore.submitItemReview('hist1', 5, 'changed my mind').ok).toBe(false);
+		expect(get(appStore).borrowHistory[0].rating).toBe(3);
+	});
+
+	it('averages across multiple borrower reviews', () => {
+		appStore.replaceState(
+			createTestState({
+				items: [createTestItem({ lenderId: 'user2', rating: 4.0 })],
+				borrowHistory: [
+					{ ...completed, id: 'h-old', rating: 5, review: 'great', reviewerId: 'user3', borrowerId: 'user3' },
+					completed
+				]
+			})
+		);
+		appStore.submitItemReview('hist1', 4, '');
+		expect(get(appStore).items[0].rating).toBe(4.5);
+	});
+
+	it('rejects anyone but the borrower', () => {
+		appStore.setCurrentUser('user2');
+		expect(appStore.submitItemReview('hist1', 5, 'nice').ok).toBe(false);
+		expect(get(appStore).borrowHistory[0].reviewerId).toBeUndefined();
+	});
+
+	it('rejects invalid ratings and unknown borrows', () => {
+		expect(appStore.submitItemReview('hist1', 0, '').ok).toBe(false);
+		expect(appStore.submitItemReview('hist1', 6, '').ok).toBe(false);
+		expect(appStore.submitItemReview('missing', 5, '').ok).toBe(false);
+	});
+
+	it('notifies the lender', () => {
+		appStore.submitItemReview('hist1', 4, 'Solid.');
+		const notes = get(appStore).notifications.filter((n) => n.type === 'item-reviewed');
+		expect(notes).toHaveLength(1);
+		expect(notes[0].userId).toBe('user2');
+		expect(notes[0].relatedId).toBe('item1');
+	});
+});
+
+describe('cancelRequest', () => {
+	it('lets the borrower cancel a pending request and tells the lender', () => {
+		appStore.replaceState(createTestState({
+			items: [createTestItem({ lenderId: 'user2' })],
+			borrowRequests: [createLifecycleRequest()]
+		}));
+		expect(appStore.cancelRequest('req1')).toEqual({ ok: true });
+		const state = get(appStore);
+		expect(state.borrowRequests[0].status).toBe('cancelled');
+		expect(state.notifications.filter((n) => n.type === 'request-cancelled').map((n) => n.userId)).toEqual(['user2']);
+	});
+
+	it('releases the item when an approved reservation is cancelled', () => {
+		appStore.replaceState(createTestState({
+			items: [createTestItem({ lenderId: 'user2', available: false })],
+			borrowRequests: [createLifecycleRequest({ status: 'approved' })],
+			wishlist: [{ id: 'w1', userId: 'user3', itemId: 'item1', notifyOnAvailable: true, addedAt: '2024-01-01T00:00:00Z' }]
+		}));
+		// lender retracts
+		appStore.setCurrentUser('user2');
+		expect(appStore.cancelRequest('req1').ok).toBe(true);
+		const state = get(appStore);
+		expect(state.items[0].available).toBe(true);
+		expect(state.notifications.filter((n) => n.type === 'wishlist-available').map((n) => n.userId)).toEqual(['user3']);
+	});
+
+	it('refuses lenders on pending requests, non-parties, and active loans', () => {
+		appStore.replaceState(createTestState({
+			items: [createTestItem({ lenderId: 'user2' })],
+			borrowRequests: [
+				createLifecycleRequest({ id: 'pending' }),
+				createLifecycleRequest({ id: 'active', status: 'active' })
+			]
+		}));
+		appStore.setCurrentUser('user2');
+		expect(appStore.cancelRequest('pending').ok).toBe(false);
+		appStore.setCurrentUser('user3');
+		expect(appStore.cancelRequest('pending').ok).toBe(false);
+		appStore.setCurrentUser('user1');
+		expect(appStore.cancelRequest('active').ok).toBe(false);
+		expect(get(appStore).borrowRequests.every((r) => r.status !== 'cancelled')).toBe(true);
 	});
 });
 
@@ -1044,6 +1482,40 @@ describe('loadState resilience', () => {
 		// Older schemas without wishlist/notifications used to crash on load
 		expect(Array.isArray(state.wishlist)).toBe(true);
 		expect(Array.isArray(state.notifications)).toBe(true);
+	});
+
+	it('migrates legacy lender-written reviews and requests without handoff arrays', async () => {
+		localStorage.setItem(
+			STORAGE_KEY,
+			JSON.stringify({
+				currentUserId: 'user1',
+				users: [{ id: 'user1', name: 'Legacy', email: '', profilePic: '', bio: '', friendIds: [], closeFriendIds: [], rating: 5, totalBorrows: 0, totalLends: 0 }],
+				items: [],
+				borrowRequests: [
+					{ id: 'r1', itemId: 'i1', borrowerId: 'user1', lenderId: 'user2', startDate: '2024-01-01', endDate: '2024-01-02', status: 'approved', createdAt: '2024-01-01T00:00:00Z' }
+				],
+				borrowHistory: [
+					{ id: 'h1', itemId: 'i1', borrowerId: 'user1', lenderId: 'user2', startDate: '2024-01-01', endDate: '2024-01-02', rating: 4, review: 'Returned on time' },
+					{ id: 'h2', itemId: 'i1', borrowerId: 'user1', lenderId: 'user2', startDate: '2024-02-01', endDate: '2024-02-02', rating: 5, review: 'Loved it', reviewerId: 'user1' }
+				]
+			})
+		);
+		vi.resetModules();
+		const mod = await import('./store');
+
+		const state = get(mod.appStore);
+		expect(state.borrowRequests[0].pickupConfirmedBy).toEqual([]);
+		expect(state.borrowRequests[0].returnConfirmedBy).toEqual([]);
+
+		const legacy = state.borrowHistory.find((h) => h.id === 'h1');
+		expect(legacy?.rating).toBeUndefined();
+		expect(legacy?.review).toBeUndefined();
+		expect(legacy?.borrowerRating).toBe(4);
+		expect(legacy?.borrowerReview).toBe('Returned on time');
+
+		const modern = state.borrowHistory.find((h) => h.id === 'h2');
+		expect(modern?.rating).toBe(5);
+		expect(modern?.reviewerId).toBe('user1');
 	});
 
 	it('falls back to defaults on corrupt JSON', async () => {

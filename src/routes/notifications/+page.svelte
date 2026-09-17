@@ -15,7 +15,9 @@
     markAsRead(notification.id);
     switch (notification.type) {
       case 'wishlist-available':
-        // relatedId is the item that became available
+      case 'review-request':
+      case 'item-reviewed':
+        // relatedId is an item id
         if (notification.relatedId) goto(`/items/${notification.relatedId}`);
         break;
       case 'friend-request':
@@ -79,6 +81,16 @@
                 📪
               {:else if notification.type === 'request-nudge'}
                 👋
+              {:else if notification.type === 'request-cancelled'}
+                🚫
+              {:else if notification.type === 'pickup-confirmed'}
+                🤝
+              {:else if notification.type === 'return-confirmed'}
+                ↩️
+              {:else if notification.type === 'review-request'}
+                ✍️
+              {:else if notification.type === 'item-reviewed'}
+                🌟
               {:else if notification.type === 'wishlist-available'}
                 🎁
               {:else}

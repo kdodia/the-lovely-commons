@@ -1,10 +1,10 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { appStore, canUserViewItem, createId, getCategoryPath, getPermissionLevelInfo } from '$lib/store';
+  import { appStore, canUserViewItem, createId, getCategoryPath, getPermissionLevelInfo, pendingItemReviews } from '$lib/store';
   import Toast from '$lib/components/Toast.svelte';
   import DateRangeCalendar from '$lib/components/DateRangeCalendar.svelte';
   import type { BorrowRequest } from '$lib/types';
-  import { NUDGE_DELAY_DAYS } from '$lib/constants';
+  import { DEFAULT_RATING, MAX_RATING, MIN_RATING, NUDGE_DELAY_DAYS } from '$lib/constants';
   import { addDays, formatDisplayDate, startOfLocalDay, toLocalISODate } from '$lib/dates';
   import { useToast } from '$lib/useToast.svelte';
 
@@ -30,12 +30,46 @@
   let isInWishlist = $derived(!!wishlistEntry);
   let notifyOnAvailable = $derived(wishlistEntry?.notifyOnAvailable ?? true);
 
-  // Get borrowing history for this item
-  let history = $derived(
+  // Borrower-written reviews of this item, newest first. `reviewerId` marks
+  // an entry as reviewed; entries without it are borrows awaiting a review.
+  let reviews = $derived(
     $appStore.borrowHistory
-      .filter((h) => h.itemId === itemId)
-      .sort((a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime())
+      .filter((h) => h.itemId === itemId && h.reviewerId && (h.review || h.rating))
+      .sort((a, b) => (a.endDate < b.endDate ? 1 : a.endDate > b.endDate ? -1 : 0))
   );
+
+  // People the owner hand-picked (only meaningful for 'specific-users')
+  let allowedUsers = $derived(
+    item?.permissionLevel === 'specific-users'
+      ? $appStore.users.filter((u) => item?.allowedUserIds?.includes(u.id))
+      : []
+  );
+
+  // The current user's most recent completed borrow that hasn't been reviewed
+  let reviewableBorrow = $derived(
+    itemId ? pendingItemReviews($appStore, itemId, $appStore.currentUserId)[0] : undefined
+  );
+
+  // Inline review form state
+  let reviewRating = $state(DEFAULT_RATING);
+  let reviewHoveredStar = $state(0);
+  let reviewText = $state('');
+
+  function submitReview() {
+    if (!reviewableBorrow) return;
+    if (reviewRating < MIN_RATING || reviewRating > MAX_RATING) {
+      toaster.showToast(`Rating must be between ${MIN_RATING} and ${MAX_RATING}`, 'error');
+      return;
+    }
+    const result = appStore.submitItemReview(reviewableBorrow.id, reviewRating, reviewText);
+    if (!result.ok) {
+      toaster.showToast(result.error, 'error');
+      return;
+    }
+    toaster.showToast('Thanks for your review!', 'success');
+    reviewRating = DEFAULT_RATING;
+    reviewText = '';
+  }
 
   // Get active borrows for calendar
   let activeBorrows = $derived(
@@ -285,6 +319,16 @@
                     This item is available to friends and their extended network
                   {:else if item.permissionLevel === 'neighbors'}
                     This item is available to anyone in {lender?.address?.city}
+                  {:else if item.permissionLevel === 'specific-users'}
+                    {#if item.lenderId === $appStore.currentUserId}
+                      {#if allowedUsers.length === 0}
+                        Only you can see this item right now — pick people in Edit Item to share it
+                      {:else}
+                        Shared with {allowedUsers.map((u) => u.name).join(', ')}
+                      {/if}
+                    {:else}
+                      {lender?.name} shared this item with a few specific people, including you
+                    {/if}
                   {/if}
                 </p>
               </div>
@@ -475,30 +519,69 @@
             />
           </div>
 
-          {#if history.length > 0}
+          {#if reviewableBorrow}
+            <div class="review-form-section card">
+              <h3>How was the {item.name}?</h3>
+              <p class="review-form-hint">
+                You borrowed it {formatDisplayDate(reviewableBorrow.startDate)} – {formatDisplayDate(reviewableBorrow.endDate)}.
+                Your review helps others decide.
+              </p>
+              <div class="form-group">
+                <!-- svelte-ignore a11y_label_has_associated_control - Label is associated with radiogroup via aria-labelledby -->
+                <label id="item-rating-label">Rating</label>
+                <div class="star-rating" role="radiogroup" aria-labelledby="item-rating-label">
+                  {#each [1, 2, 3, 4, 5] as star}
+                    <button
+                      type="button"
+                      class="star"
+                      class:filled={star <= (reviewHoveredStar || reviewRating)}
+                      role="radio"
+                      aria-label="Rate {star} out of 5 stars"
+                      aria-checked={star === reviewRating}
+                      onclick={() => (reviewRating = star)}
+                      onmouseenter={() => (reviewHoveredStar = star)}
+                      onmouseleave={() => (reviewHoveredStar = 0)}
+                    >
+                      <span aria-hidden="true">⭐</span>
+                    </button>
+                  {/each}
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="item-review">Review (optional)</label>
+                <textarea
+                  id="item-review"
+                  bind:value={reviewText}
+                  placeholder="Did it work well? Anything the next borrower should know?"
+                  rows="3"
+                ></textarea>
+              </div>
+              <button class="btn btn-primary" onclick={submitReview}>Submit Review</button>
+            </div>
+          {/if}
+
+          {#if reviews.length > 0}
             <div class="reviews-section card">
-              <h3>Reviews ({history.filter((h) => h.review).length})</h3>
+              <h3>Reviews ({reviews.length})</h3>
               <div class="reviews-list">
-                {#each history.filter((h) => h.review) as hist}
-                  {@const reviewer = $appStore.users.find((u) => u.id === hist.lenderId)}
-                  {@const borrower = $appStore.users.find((u) => u.id === hist.borrowerId)}
+                {#each reviews as hist (hist.id)}
+                  {@const reviewer = $appStore.users.find((u) => u.id === hist.reviewerId)}
                   <div class="review-item">
                     <div class="review-header">
                       <img src={reviewer?.profilePic} alt={reviewer?.name} class="reviewer-avatar" />
                       <div>
-                        <div class="reviewer-name">{reviewer?.name}</div>
-                        <div class="review-context">after a borrow by {borrower?.name}</div>
-                        <div class="review-rating">
-                          {#each Array(hist.rating || 0) as _, i}
+                        <div class="reviewer-name">{reviewer?.name ?? 'A borrower'}</div>
+                        <div class="review-context">borrowed {formatDisplayDate(hist.endDate, { month: 'short', year: 'numeric' })}</div>
+                        <div class="review-rating" aria-label="{hist.rating ?? 0} out of {MAX_RATING} stars">
+                          {#each Array(hist.rating || 0) as _}
                             <span aria-hidden="true">⭐</span>
                           {/each}
                         </div>
                       </div>
                     </div>
-                    <p class="review-text">{hist.review}</p>
-                    <div class="review-date">
-                      {formatDisplayDate(hist.endDate, { month: 'short', year: 'numeric' })}
-                    </div>
+                    {#if hist.review}
+                      <p class="review-text">{hist.review}</p>
+                    {/if}
                   </div>
                 {/each}
               </div>
@@ -1131,11 +1214,6 @@
     margin: 0 0 0.5rem 0;
   }
 
-  .review-date {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-  }
-
   .error-state {
     text-align: center;
     padding: 4rem 2rem;
@@ -1154,5 +1232,69 @@
     .date-arrow {
       transform: rotate(90deg);
     }
+  }
+
+  .review-form-section {
+    padding: 1.5rem;
+  }
+
+  .review-form-section h3 {
+    margin: 0 0 0.25rem 0;
+    font-size: 1.125rem;
+  }
+
+  .review-form-hint {
+    margin: 0 0 1rem 0;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+  }
+
+  .review-form-section .form-group {
+    margin-bottom: 1rem;
+  }
+
+  .review-form-section label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    font-size: 0.875rem;
+  }
+
+  .review-form-section textarea {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 0.9375rem;
+    resize: vertical;
+  }
+
+  .review-form-section textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+  }
+
+  .star-rating {
+    display: flex;
+    gap: 0.375rem;
+  }
+
+  .star {
+    background: none;
+    border: none;
+    font-size: 1.75rem;
+    cursor: pointer;
+    padding: 0;
+    opacity: 0.3;
+    transition: transform var(--transition), opacity var(--transition);
+  }
+
+  .star:hover {
+    transform: scale(1.15);
+  }
+
+  .star.filled {
+    opacity: 1;
   }
 </style>
