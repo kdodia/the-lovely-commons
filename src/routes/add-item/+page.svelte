@@ -2,6 +2,7 @@
   import { appStore, createId } from '$lib/store';
   import { goto } from '$app/navigation';
   import Toast from '$lib/components/Toast.svelte';
+  import FriendPicker from '$lib/components/FriendPicker.svelte';
   import type { Item, PermissionLevel } from '$lib/types';
   import { useToast } from '$lib/useToast.svelte';
 
@@ -12,6 +13,7 @@
   let subcategoryId = $state('');
   let condition = $state<'excellent' | 'good' | 'fair' | 'poor'>('good');
   let permissionLevel = $state<PermissionLevel>('friends');
+  let allowedUserIds = $state<string[]>([]);
   const toaster = useToast();
 
   // Get all categories for dropdown
@@ -48,7 +50,7 @@
       imageUrl: imageUrl.trim(),
       condition,
       permissionLevel,
-      allowedUserIds: permissionLevel === 'specific-users' ? [] : undefined,
+      allowedUserIds: permissionLevel === 'specific-users' ? [...allowedUserIds] : undefined,
       tagIds: [],
       rating: 0,
       totalBorrows: 0,
@@ -218,7 +220,17 @@
                   <span class="permission-desc">Anyone in your area</span>
                 </div>
               </label>
+              <label class="radio-label-vertical">
+                <input type="radio" bind:group={permissionLevel} value="specific-users" />
+                <div class="permission-info">
+                  <span class="permission-title">Specific People</span>
+                  <span class="permission-desc">Hand-pick who can see and borrow it</span>
+                </div>
+              </label>
             </div>
+            {#if permissionLevel === 'specific-users'}
+              <FriendPicker bind:selectedIds={allowedUserIds} />
+            {/if}
           </fieldset>
         </div>
 

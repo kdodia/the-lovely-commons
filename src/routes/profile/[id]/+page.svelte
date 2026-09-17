@@ -173,7 +173,11 @@
                   <div class="history-details">
                     <div class="history-action">
                       <span><span aria-hidden="true">{activityTab === 'borrowing' ? '📤' : '📥'}</span> {activityTab === 'borrowing' ? 'Borrowed' : 'Lent'}</span>
-                      <a href="/items/{item?.id}" class="history-link"><strong>{item?.name}</strong></a>
+                      {#if item}
+                        <a href="/items/{item.id}" class="history-link"><strong>{item.name}</strong></a>
+                      {:else}
+                        <strong class="removed-item">a removed item</strong>
+                      {/if}
                       <span>{activityTab === 'borrowing' ? 'from' : 'to'}</span>
                       <a href="/profile/{otherUser?.id}" class="history-link"><strong>{otherUser?.name}</strong></a>
                       {#if status === 'active'}
@@ -216,8 +220,8 @@
                         })}
                       {/if}
                     </div>
-                    {#if 'rating' in activity && activity.rating}
-                      <div class="history-rating">
+                    {#if 'reviewerId' in activity && activity.reviewerId && activity.rating}
+                      <div class="history-rating" title="{activityTab === 'borrowing' ? 'Their' : "The borrower's"} review of the item">
                         {#each Array(Math.max(0, Math.min(5, Math.floor(Number(activity.rating) || 0)))) as _}
                           <span aria-hidden="true">⭐</span>
                         {/each}
@@ -470,5 +474,10 @@
     .items-grid {
       grid-template-columns: 1fr;
     }
+  }
+
+  .removed-item {
+    color: var(--text-secondary);
+    font-style: italic;
   }
 </style>

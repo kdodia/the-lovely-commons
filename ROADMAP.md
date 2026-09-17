@@ -1,27 +1,34 @@
 # Roadmap — Library of Things
 
-This document is a self-contained handoff for a future implementation session
-(planned: Claude Opus 5). It assumes no prior conversation context — everything
-needed is here or in `CLAUDE.md`.
+This document is a self-contained handoff for a future implementation session.
+It assumes no prior conversation context — everything needed is here or in
+`CLAUDE.md`.
 
 ## Where the project stands
 
-A full bug-fix and hardening pass landed on `claude/code-review-improvements-1inwwx`
-(July 2026): the borrow lifecycle works end-to-end (`pending → approved → active
-→ completed`), the permission system is enforced on deep links, dates are
-timezone-safe, toasts render everywhere, mock data is generated relative to
-today, and there are 117 tests. A navbar **user switcher** lets you experience
-the app as any mock user — use it to verify permission behavior from both sides
-of every feature below.
+Two passes have landed:
+
+1. **Hardening pass** (`claude/code-review-improvements-1inwwx`): the borrow
+   lifecycle works end-to-end, permissions are enforced on deep links, dates
+   are timezone-safe, toasts render everywhere, mock data is generated relative
+   to today, and a navbar **user switcher** lets you experience the app as any
+   mock user.
+2. **Feature pass** (`claude/happy-cannon-511acm`): the three features that
+   were planned here are done — see "Shipped" below. 157 tests.
 
 ## Conventions (do not regress these)
 
 - **All state mutations go through `appStore` action methods** in
   `src/lib/store.ts`. The raw writable `set`/`update` are deliberately not
   exported; tests inject fixtures with `appStore.replaceState()`.
-- **Lifecycle methods return `ActionResult`** (`{ ok: true } | { ok: false; error }`).
+- **The actor is `state.currentUserId`.** Store methods check that the actor
+  is allowed (owner / borrower / lender / tag creator) and reject otherwise.
+- **Rejectable methods return `ActionResult`** (`{ ok: true } | { ok: false; error }`).
   New rejectable actions must follow this pattern, and callers must surface
   `result.error` in a toast.
+- **Schema changes need a `migrateState()` step** (in `store.ts`). It runs on
+  every load and must be idempotent. Nested fields added later are still read
+  with `?? []` / `?? undefined` at use sites.
 - **Dates**: app-state dates are `'YYYY-MM-DD'` local calendar days. Only use
   helpers from `src/lib/dates.ts` (`toLocalISODate`, `parseLocalDate`,
   `todayLocalISO`, `formatDisplayDate`, `rangesOverlap`, `addDays`). Never
@@ -37,93 +44,59 @@ of every feature below.
   additionally with `TZ=Pacific/Auckland` to catch UTC-shift regressions. The
   pre-commit hook runs check + test automatically.
 
-## Feature 1 — Expose hidden abilities
+## Shipped
 
-Store capabilities that exist but have no UI.
+### Feature 1 — Hidden abilities exposed
+- `deleteItem` returns `ActionResult`, is owner-only, is blocked while the
+  item has an approved/active loan, declines pending requests (with a
+  notification to each requester), and scrubs the item from tags and
+  wishlists. UI: "Remove from library" danger zone on `items/[id]/edit` with a
+  confirm modal.
+- Tags can be renamed inline and deleted (`deleteTag`, creator-only) on `/tags`.
+- `specific-users` is selectable in the add/edit forms with a
+  `FriendPicker.svelte` checkbox list that fills `allowedUserIds`. The item
+  page explains the tier to the owner (who it's shared with) and to a picked
+  user.
 
-1. **Delete item** (`appStore.deleteItem` exists, unused)
-   - Add a delete action on `/my-items` cards and/or `items/[id]/edit`.
-   - Convert `deleteItem` to return `ActionResult` and **block deletion while
-     the item has `approved`/`active` requests** (someone physically has it).
-   - On delete, clean up: remove the item's id from all `tags[].itemIds`,
-     remove wishlist entries for it, and deny outstanding `pending` requests
-     with a notification to each requester.
-   - Confirm with a modal (copy the reset-confirm modal pattern in
-     `src/routes/+layout.svelte`).
-2. **Tag management** (`appStore.updateTag` exists, unused)
-   - `/tags`: rename (inline edit → `updateTag`) and delete (new `deleteTag`
-     store method) with confirmation.
-3. **`specific-users` permission editor**
-   - `add-item` and `edit` forms currently omit the `specific-users` option
-     entirely. Add it, plus a friend-picker (checkbox list of the current
-     user's friends/close friends) that populates `allowedUserIds`.
-   - Mock item `item17` (Celestron Telescope) already uses this tier for
-     manual testing.
+### Feature 2 — Borrower-side loan view + borrower reviews
+- `borrowedByMe` derived store; the dashboard has **Lending** and
+  **Borrowing** tabs built on `LoanCard.svelte`.
+- Reviews are split: the lender's return modal now rates the *borrower*
+  (`borrowerRating`/`borrowerReview`, folded into `User.rating` as a running
+  mean weighted by `totalBorrows`), and the borrower reviews the *item* via
+  `submitItemReview(historyId, rating, review)` (once per borrow, attributed
+  with `reviewerId`, averaged into `Item.rating`). After a return the borrower
+  gets a `review-request` notification linking to the item page, where an
+  inline form appears; the lender gets an `item-reviewed` notification.
+- Mock history is in borrower voice; `hist4` is left unreviewed so Sarah sees
+  the prompt on the Coleman tent.
 
-Tests: deletion blocked during active loan; deletion cleans tags/wishlist and
-denies pending requests; `deleteTag` removes the tag; `specific-users` items
-visible only to `allowedUserIds` (helper already covered — test the form wiring
-via a store-level test on the created item).
+### Feature 3 — Two-sided handoff
+- `markPickedUp`/`completeBorrow` are gone. `confirmPickup(requestId)` and
+  `confirmReturn(requestId, lenderFeedback?)` each record the caller in
+  `pickupConfirmedBy` / `returnConfirmedBy`; the loan advances only when both
+  parties have confirmed. The other party is notified on each confirmation.
+  The lender's feedback is stashed on the request (`lenderReturnFeedback`) if
+  they confirm first, so order doesn't matter.
+- `cancelRequest(requestId)`: borrower cancels pending/approved, lender
+  retracts an approval; releases the item and notifies wishlist subscribers.
 
-## Feature 2 — Borrower-side loan view + borrower reviews
+## Next ideas (not started)
 
-The dashboard is lender-centric; borrowers can't see what they're holding, and
-reviews are currently written by the *lender* in the return modal (displayed
-with correct attribution, but semantically these rate the borrower, not the item).
-
-1. **Borrower view**: new derived store `borrowedByMe` (mirror of `activeLoans`
-   with `borrowerId === currentUserId`, statuses `approved`/`active`). Show it
-   as a dashboard section or tab: item, lender, due date, overdue flag (string
-   compare vs `todayLocalISO()`).
-2. **Split the review flow**:
-   - Keep the lender's return-modal rating, but store it as a **borrower
-     rating** (feeds `User.rating` of the borrower over time), not the item
-     rating.
-   - New `submitItemReview(historyId, rating, review)` store method
-     (ActionResult): only the borrow's borrower may call it, once per history
-     entry. Add `reviewerId` to `BorrowHistory` (or a parallel field) so
-     display code needn't guess.
-   - Recompute `item.rating` from borrower-written reviews only.
-   - After a return, notify the borrower ("How was the item?") with a
-     notification of a new type that links to the item page, where an inline
-     review form appears for eligible borrows.
-   - Update the reviews section in `src/routes/items/[id]/+page.svelte` to
-     show borrower attribution (it currently labels reviews as lender-written,
-     matching today's data flow — flip the copy when the data flow flips).
-3. Update `src/lib/mockData.ts` review voice back to borrower-voice when this
-   lands (there's a note in that file).
-
-Tests: `borrowedByMe` filtering; only the borrower can review, only once;
-item rating recomputed from borrower reviews; return notification created.
-
-## Feature 3 — Two-sided handoff
-
-Make pickup/return require confirmation from both parties, so the lifecycle
-reflects physical reality.
-
-1. **Types** (`src/lib/types.ts`): add to `BorrowRequest`:
-   `pickupConfirmedBy?: string[]`, `returnConfirmedBy?: string[]`.
-2. **Store**: replace `markPickedUp` with `confirmPickup(requestId)` and add
-   `confirmReturn(requestId)` (both ActionResult):
-   - Caller must be the request's borrower or lender; each user can confirm
-     once. When *both* have confirmed pickup → status `active`. When both
-     confirm return → run today's completion logic (`completeBorrow`
-     availability/counter/wishlist rules) and prompt the borrower to review
-     (Feature 2).
-   - Notify the other party on each first confirmation ("Sarah confirmed
-     pickup — confirm on your side").
-   - Keep `loadState` migration-safe: old persisted requests without the new
-     arrays must be treated as `[]` (the schema-merge in `loadState` handles
-     missing top-level keys; these are nested, so default with `?? []` at
-     read sites).
-3. **UI**: dashboard (lender side) and the Feature-2 borrower view each show a
-   "Confirm pickup/return" button with a "waiting for other party" state.
-
-Tests: single-sided confirmation doesn't advance status; both-sided does;
-non-parties rejected; double-confirm by same user rejected; legacy requests
-without the arrays still work.
-
-## Suggested order
-
-Feature 1 → 2 → 3. Feature 3 builds on Feature 2's borrower view, and 2's
-review flow is triggered from 3's return confirmation.
+1. **Navbar overflow on phones.** At 390px the nav bar is ~460px wide (the
+   icon row plus reset/bell/avatar). Collapse into a menu or hide the reset
+   button below a breakpoint. Pre-existing; `src/routes/+layout.svelte`.
+2. **Overdue nudges.** `return-reminder` exists as a notification type but
+   nothing emits it. A derived "overdue loans" store could power a dashboard
+   banner, and the lender could send a one-tap reminder (mirror `nudgeRequest`
+   with its cooldown).
+3. **Borrower profile shows lender feedback.** `borrowerReview` is stored but
+   only the rating surfaces (via `User.rating`). Show the lender's notes on the
+   borrower's profile, visible to the borrower and to lenders considering a
+   request.
+4. **Request-level chat.** Requests carry a single `message`. A small thread
+   (`messages: { fromUserId, text, at }[]` on `BorrowRequest`) would let the
+   two parties agree on pickup details without leaving the app.
+5. **Route tests.** Store coverage is thorough; the routes are only smoke
+   tested manually. `@testing-library/svelte` + the writable `page` mock in
+   `src/test/mocks/stores.ts` make item-page and dashboard tests feasible.

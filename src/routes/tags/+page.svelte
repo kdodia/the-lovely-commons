@@ -48,6 +48,74 @@
     selectedTagId = tag.id;
   }
 
+  // Rename / delete
+  let editingName = $state(false);
+  let editedName = $state('');
+  let renameInput = $state<HTMLInputElement | undefined>();
+  let showDeleteConfirm = $state(false);
+  let deleteModalElement = $state<HTMLDivElement | undefined>();
+
+  function startRename() {
+    if (!selectedTag) return;
+    editedName = selectedTag.name;
+    editingName = true;
+  }
+
+  function saveRename() {
+    if (!selectedTagId) return;
+    const name = editedName.trim();
+    if (!name) {
+      toaster.showToast('Tag name can\'t be empty', 'error');
+      return;
+    }
+    appStore.updateTag(selectedTagId, { name });
+    editingName = false;
+    toaster.showToast('Tag renamed', 'success');
+  }
+
+  function cancelRename() {
+    editingName = false;
+  }
+
+  function handleRenameKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveRename();
+    } else if (e.key === 'Escape') {
+      cancelRename();
+    }
+  }
+
+  function confirmDelete() {
+    if (!selectedTagId) return;
+    const result = appStore.deleteTag(selectedTagId);
+    showDeleteConfirm = false;
+    if (!result.ok) {
+      toaster.showToast(result.error, 'error');
+      return;
+    }
+    selectedTagId = null;
+    toaster.showToast('Tag deleted', 'success');
+  }
+
+  function handleDeleteModalKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') showDeleteConfirm = false;
+  }
+
+  $effect(() => {
+    if (editingName && renameInput) renameInput.focus();
+  });
+
+  $effect(() => {
+    if (showDeleteConfirm && deleteModalElement) deleteModalElement.focus();
+  });
+
+  // Leaving edit mode when switching tags
+  $effect(() => {
+    selectedTagId;
+    editingName = false;
+  });
+
   function addItemToTag(itemId: string) {
     if (!selectedTagId) return;
     appStore.addItemToTag(selectedTagId, itemId);
@@ -123,7 +191,30 @@
       <div class="tags-content">
         {#if selectedTag}
           <div class="tag-details">
-            <h2>{selectedTag.name}</h2>
+            <div class="tag-heading">
+              {#if editingName}
+                <form class="rename-form" onsubmit={(e) => { e.preventDefault(); saveRename(); }}>
+                  <label for="rename-tag" class="sr-only">Tag name</label>
+                  <input
+                    id="rename-tag"
+                    type="text"
+                    class="rename-input"
+                    bind:value={editedName}
+                    bind:this={renameInput}
+                    onkeydown={handleRenameKeydown}
+                    maxlength="60"
+                  />
+                  <button type="submit" class="btn btn-primary btn-sm" disabled={!editedName.trim()}>Save</button>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick={cancelRename}>Cancel</button>
+                </form>
+              {:else}
+                <h2>{selectedTag.name}</h2>
+                <div class="tag-heading-actions">
+                  <button class="btn btn-secondary btn-sm" onclick={startRename}>Rename</button>
+                  <button class="btn btn-secondary btn-sm btn-danger-text" onclick={() => (showDeleteConfirm = true)}>Delete</button>
+                </div>
+              {/if}
+            </div>
 
             <div class="items-section">
               <h3>Items in this collection ({tagItems.length})</h3>
@@ -193,11 +284,115 @@
   </div>
 </div>
 
+{#if showDeleteConfirm && selectedTag}
+  <!-- svelte-ignore a11y_click_events_have_key_events - Modal overlay has onkeydown handler for Escape key -->
+  <div class="modal-overlay" onclick={() => (showDeleteConfirm = false)} onkeydown={handleDeleteModalKeydown} role="presentation">
+    <div class="modal-content" bind:this={deleteModalElement} onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="delete-tag-title" tabindex="-1">
+      <h2 id="delete-tag-title">Delete "{selectedTag.name}"?</h2>
+      <p>The collection goes away; the {selectedTag.itemIds.length} {selectedTag.itemIds.length === 1 ? 'item' : 'items'} in it stay in your library.</p>
+      <div class="modal-actions">
+        <button class="btn btn-error" onclick={confirmDelete}>Delete Tag</button>
+        <button class="btn btn-secondary" onclick={() => (showDeleteConfirm = false)}>Cancel</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if toaster.toast}
   <Toast message={toaster.toast.message} type={toaster.toast.type} onClose={toaster.clearToast} />
 {/if}
 
 <style>
+  .tag-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+  }
+
+  .tag-heading h2 {
+    margin: 0;
+  }
+
+  .tag-heading-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .btn-danger-text {
+    color: var(--error);
+  }
+
+  .rename-form {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex: 1;
+    flex-wrap: wrap;
+  }
+
+  .rename-input {
+    flex: 1;
+    min-width: 200px;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .btn-error {
+    background-color: var(--error);
+    color: white;
+  }
+
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+  }
+
+  .modal-content {
+    background: var(--background);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    max-width: 440px;
+    width: 100%;
+    padding: 2rem;
+  }
+
+  .modal-content h2 {
+    margin: 0 0 0.75rem 0;
+    font-size: 1.375rem;
+  }
+
+  .modal-content p {
+    margin: 0 0 1.5rem 0;
+    color: var(--text-secondary);
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+  }
+
   .page-header {
     display: flex;
     justify-content: space-between;
@@ -315,7 +510,7 @@
   }
 
   .tag-details h2 {
-    margin: 0 0 2rem 0;
+    margin: 0;
     font-size: 1.75rem;
   }
 

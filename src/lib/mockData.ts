@@ -464,7 +464,9 @@ export const mockBorrowRequests: BorrowRequest[] = [
     endDate: daysFromNow(3),
     status: 'active',
     message: 'Making a big batch of pesto for a party!',
-    createdAt: timestampDaysAgo(6)
+    createdAt: timestampDaysAgo(6),
+    pickupConfirmedBy: ['user2', 'user1'],
+    returnConfirmedBy: []
   },
   {
     id: 'req4',
@@ -479,9 +481,10 @@ export const mockBorrowRequests: BorrowRequest[] = [
   }
 ];
 
-// Mock borrow history.
-// Note: in the current flow the lender writes the rating/review when marking
-// an item returned, so these are written in the lender's voice.
+// Mock borrow history. `rating`/`review` are the borrower's review of the
+// item (attributed via `reviewerId`); `borrowerRating` is the lender's rating
+// of the borrower, written when the return was confirmed. hist4 has no
+// borrower review yet so Sarah (the default user) sees the review prompt.
 export const mockBorrowHistory: BorrowHistory[] = [
   {
     id: 'hist1',
@@ -492,7 +495,11 @@ export const mockBorrowHistory: BorrowHistory[] = [
     endDate: daysFromNow(-41),
     actualReturnDate: daysFromNow(-41),
     rating: 5,
-    review: 'Marcus returned it spotless and right on time. Happy to lend again!'
+    review: 'Cooked for twelve people with room to spare. Sarah even threw in her chili recipe!',
+    reviewerId: 'user2',
+    reviewedAt: timestampDaysAgo(40, 19),
+    borrowerRating: 5,
+    borrowerReview: 'Returned it spotless and right on time. Happy to lend again!'
   },
   {
     id: 'hist2',
@@ -503,7 +510,11 @@ export const mockBorrowHistory: BorrowHistory[] = [
     endDate: daysFromNow(-36),
     actualReturnDate: daysFromNow(-36),
     rating: 5,
-    review: 'Smooth handoff, drill came back with every bit accounted for.'
+    review: 'Battery lasted the whole shelf project. The bit set covers everything you need.',
+    reviewerId: 'user3',
+    reviewedAt: timestampDaysAgo(35, 12),
+    borrowerRating: 5,
+    borrowerReview: 'Smooth handoff, drill came back with every bit accounted for.'
   },
   {
     id: 'hist3',
@@ -514,7 +525,11 @@ export const mockBorrowHistory: BorrowHistory[] = [
     endDate: daysFromNow(-59),
     actualReturnDate: daysFromNow(-59),
     rating: 5,
-    review: 'Sarah took great care of the projector. Easy lend!'
+    review: 'Bright enough for a backyard movie night with the porch light on. Easy setup.',
+    reviewerId: 'user1',
+    reviewedAt: timestampDaysAgo(58, 21),
+    borrowerRating: 5,
+    borrowerReview: 'Sarah took great care of the projector. Easy lend!'
   },
   {
     id: 'hist4',
@@ -523,9 +538,9 @@ export const mockBorrowHistory: BorrowHistory[] = [
     lenderId: 'user4',
     startDate: daysFromNow(-85),
     endDate: daysFromNow(-82),
-    actualReturnDate: daysFromNow(-82),
-    rating: 4,
-    review: 'Tent came back clean, just a little late on the return.'
+    actualReturnDate: daysFromNow(-81),
+    borrowerRating: 4,
+    borrowerReview: 'Tent came back clean, just a little late on the return.'
   },
   {
     id: 'hist5',
@@ -535,8 +550,12 @@ export const mockBorrowHistory: BorrowHistory[] = [
     startDate: daysFromNow(-70),
     endDate: daysFromNow(-69),
     actualReturnDate: daysFromNow(-69),
-    rating: 5,
-    review: 'Alex even topped off the detergent tank. Model borrower!'
+    rating: 4,
+    review: "Blasted a winter's worth of grime off the patio in an hour. Long hose, easy to start.",
+    reviewerId: 'user4',
+    reviewedAt: timestampDaysAgo(68, 9),
+    borrowerRating: 5,
+    borrowerReview: 'Alex even topped off the detergent tank. Model borrower!'
   }
 ];
 
@@ -592,6 +611,16 @@ export const mockNotifications: Notification[] = [
     read: false,
     createdAt: timestampDaysAgo(1, 9),
     relatedId: 'freq2'
+  },
+  {
+    id: 'notif-seed-review',
+    userId: 'user1',
+    type: 'review-request',
+    title: 'How was the item?',
+    message: 'Coleman 4-Person Tent is back with Alex Kim. Leave a quick review to help others.',
+    read: false,
+    createdAt: timestampDaysAgo(81, 18),
+    relatedId: 'item6'
   },
   {
     id: 'notif-seed-4',
