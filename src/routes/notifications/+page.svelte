@@ -13,12 +13,19 @@
 
   function handleNotificationClick(notification: Notification) {
     markAsRead(notification.id);
-    if (notification.relatedId) {
-      if (notification.type === 'borrow-request') {
+    switch (notification.type) {
+      case 'wishlist-available':
+        // relatedId is the item that became available
+        if (notification.relatedId) goto(`/items/${notification.relatedId}`);
+        break;
+      case 'friend-request':
+      case 'friend-request-accepted':
+      case 'friend-request-declined':
+        goto('/network');
+        break;
+      default:
+        // Borrow lifecycle notifications are handled on the dashboard
         goto('/dashboard');
-      } else {
-        goto('/dashboard');
-      }
     }
   }
 
@@ -64,6 +71,16 @@
                 ⏰
               {:else if notification.type === 'item-returned'}
                 📦
+              {:else if notification.type === 'friend-request'}
+                💌
+              {:else if notification.type === 'friend-request-accepted'}
+                🤝
+              {:else if notification.type === 'friend-request-declined'}
+                📪
+              {:else if notification.type === 'request-nudge'}
+                👋
+              {:else if notification.type === 'wishlist-available'}
+                🎁
               {:else}
                 ℹ️
               {/if}

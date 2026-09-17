@@ -1,5 +1,5 @@
 {
-	"name": "claude-playground",
+	"name": "the-lovely-commons",
 	"private": true,
 	"version": "0.0.1",
 	"type": "module",
@@ -21,6 +21,8 @@
 		"@sveltejs/vite-plugin-svelte": "^6.2.1",
 		"@testing-library/jest-dom": "^6.9.1",
 		"@testing-library/svelte": "^5.2.9",
+		"@vitest/coverage-v8": "^4.0.15",
+		"@vitest/ui": "^4.0.15",
 		"husky": "^9.1.7",
 		"jsdom": "^27.2.0",
 		"lint-staged": "^16.2.6",
@@ -32,7 +34,8 @@
 	},
 	"lint-staged": {
 		"*.{ts,svelte}": [
-			"svelte-check --tsconfig ./tsconfig.json"
+			"bash -c 'bun run check'",
+			"bash -c 'bun run test'"
 		]
 	}
 }

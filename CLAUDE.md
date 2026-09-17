@@ -12,7 +12,7 @@ This project uses [Bun](https://bun.sh) as its package manager and runtime.
 
 ```bash
 # Install dependencies
-bun install                 # Install all dependencies (creates bun.lockb)
+bun install                 # Install all dependencies (creates bun.lock)
 
 # Development server
 bun run dev                 # Start dev server at http://localhost:5173
@@ -42,8 +42,9 @@ bun run prepare            # Setup husky git hooks (runs automatically after ins
 The app uses a centralized Svelte store (`src/lib/store.ts`) with localStorage persistence:
 
 - **Single source of truth**: `appStore` contains all application state (`AppState` type)
-- **Derived stores**: Computed values like `currentUser`, `currentUserItems`, `visibleItems`, `incomingRequests`, etc.
-- **Action methods**: All state mutations go through store methods (e.g., `createBorrowRequest`, `updateItem`, `addToWishlist`)
+- **Derived stores**: Computed values like `currentUser`, `currentUserItems`, `visibleItems`, `incomingRequests`, `approvedLoans`, `activeLoans`, etc.
+- **Action methods**: All state mutations go through store methods (e.g., `createBorrowRequest`, `updateItem`, `addToWishlist`). The raw writable `set`/`update` are intentionally not exported; tests use `appStore.replaceState()` to inject fixtures.
+- **ActionResult**: Lifecycle methods that can be rejected (`createBorrowRequest`, `approveRequest`, `denyRequest`, `markPickedUp`, `completeBorrow`, `nudgeRequest`) return `{ ok: true } | { ok: false; error }` so the UI can show the reason.
 - **Automatic persistence**: State automatically syncs to localStorage on every change
 - **Cross-tab sync**: Uses storage events to sync state across browser tabs
 - **Reset mechanism**: `appStore.reset()` or clear localStorage key `distributed-library-app-state`
@@ -64,7 +65,7 @@ The `canUserViewItem()` helper function in `store.ts` implements this logic. The
 
 - **Users** can be friends or close friends (stored in `friendIds` and `closeFriendIds` arrays)
 - **Items** belong to lenders, have categories, tags, and permission levels
-- **BorrowRequests** track the borrowing lifecycle (pending → approved → active → completed)
+- **BorrowRequests** track the borrowing lifecycle: pending → approved (lender approves; item becomes unavailable) → active (lender marks picked up) → completed (lender marks returned; moves to history)
 - **BorrowHistory** stores completed borrows with ratings and condition tracking
 - **Tags** are user-created collections that reference item IDs (many-to-many)
 - **Wishlist** allows users to subscribe to unavailable items with notifications
@@ -98,7 +99,7 @@ SvelteKit file-based routing:
 - `/dashboard` - Owner dashboard for managing requests and active loans
 - `/my-items` - User's item library
 - `/wishlist` - User's wishlist with availability notifications
-- `/network` - Friend management (not yet implemented in latest code)
+- `/network` - Friend management (tiers, promote/demote close friends, send/accept/decline friend requests)
 - `/tags` - Tag collections management
 - `/profile/[id]` - User profile pages
 - `/notifications` - Notifications center
@@ -107,7 +108,11 @@ Layout: `src/routes/+layout.svelte` contains the navigation bar and wraps all pa
 
 ### Toast Notifications
 
-The `src/lib/useToast.svelte.ts` module exports `showToast()` function for user feedback. Toast component lives in a separate file (pattern: export function + Toast.svelte component).
+The `src/lib/useToast.svelte.ts` module exports a `useToast()` factory. Keep the returned object intact — `const toaster = useToast()`, then `toaster.showToast(...)` and `{#if toaster.toast}` in the template. Do NOT destructure `toast` from it: that reads the reactive getter once and permanently disconnects it. Render with the shared `Toast.svelte` component, passing `onClose={toaster.clearToast}`.
+
+### Date Handling
+
+Dates in app state are `'YYYY-MM-DD'` strings meaning a local calendar day. Always use the helpers in `src/lib/dates.ts` (`toLocalISODate`, `parseLocalDate`, `todayLocalISO`, `formatDisplayDate`, `rangesOverlap`) — never `Date.prototype.toISOString()` or `new Date('YYYY-MM-DD')`, both of which shift the day for users outside UTC.
 
 ## Data Persistence
 

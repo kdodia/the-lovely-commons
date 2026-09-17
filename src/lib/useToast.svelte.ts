@@ -1,24 +1,32 @@
 import { TOAST_DURATION_MS } from './constants';
 
-export type ToastType = 'success' | 'error';
+export type ToastType = 'success' | 'error' | 'info' | 'warning';
 export type ToastMessage = { message: string; type: ToastType } | null;
 
 /**
  * Reusable toast notification utility
  * Provides state and helper to show auto-dismissing toast messages
  *
+ * IMPORTANT: keep the returned object intact. Destructuring `toast` reads the
+ * getter once (always `null`) and disconnects it from reactivity.
+ *
  * Usage:
  * ```ts
- * const { toast, showToast } = useToast();
+ * const toaster = useToast();
  *
  * function handleAction() {
- *   showToast('Action completed!', 'success');
+ *   toaster.showToast('Action completed!', 'success');
  * }
+ * ```
+ * ```svelte
+ * {#if toaster.toast}
+ *   <Toast message={toaster.toast.message} type={toaster.toast.type} onClose={toaster.clearToast} />
+ * {/if}
  * ```
  */
 export function useToast() {
   let toast = $state<ToastMessage>(null);
-  let timeoutId: number | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   function showToast(message: string, type: ToastType = 'success', duration = TOAST_DURATION_MS) {
     // Clear any existing timeout
@@ -30,7 +38,7 @@ export function useToast() {
     toast = { message, type };
 
     // Auto-clear after duration
-    timeoutId = window.setTimeout(() => {
+    timeoutId = setTimeout(() => {
       toast = null;
       timeoutId = undefined;
     }, duration);

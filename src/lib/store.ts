@@ -1,29 +1,72 @@
-import { writable, derived, get } from 'svelte/store';
+import { writable, derived } from 'svelte/store';
 import { browser } from '$app/environment';
 import type { AppState, Item, User, BorrowRequest, Notification, BorrowHistory, Tag, FriendRequest, ItemCondition, WishlistItem } from './types';
 import { initialAppState } from './mockData';
+import { rangesOverlap, todayLocalISO } from './dates';
+import { NUDGE_DELAY_DAYS } from './constants';
 
-const STORAGE_KEY = 'distributed-library-app-state';
+export const STORAGE_KEY = 'distributed-library-app-state';
+
+/** Result of a store action that can be rejected (e.g. date conflicts). */
+export type ActionResult = { ok: true } | { ok: false; error: string };
+
+const STATE_COLLECTIONS = [
+  'users',
+  'items',
+  'categories',
+  'tags',
+  'borrowRequests',
+  'borrowHistory',
+  'friendRequests',
+  'notifications',
+  'wishlist'
+] as const;
+
+/** Generate a unique id with a readable prefix. */
+export function createId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
 
 // Load state from localStorage or use initial state
 function loadState(): AppState {
+  const defaults = structuredClone(initialAppState);
   if (browser) {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       try {
-        return JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          // Merge over defaults so state persisted by an older version of the
+          // app (missing newer collections like `wishlist`) doesn't crash.
+          const merged: AppState = { ...defaults, ...parsed };
+          for (const key of STATE_COLLECTIONS) {
+            if (!Array.isArray(merged[key])) {
+              Object.assign(merged, { [key]: defaults[key] });
+            }
+          }
+          if (!merged.users.some((u) => u.id === merged.currentUserId)) {
+            merged.currentUserId = defaults.currentUserId;
+          }
+          return merged;
+        }
       } catch (e) {
         console.error('Failed to parse stored state:', e);
       }
     }
   }
-  return initialAppState;
+  return defaults;
 }
 
 // Save state to localStorage
 function saveState(state: AppState) {
   if (browser) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      // Quota exceeded or storage unavailable (e.g. private mode) — the app
+      // keeps working in-memory, persistence just pauses.
+      console.error('Failed to save state:', e);
+    }
   }
 }
 
@@ -36,7 +79,7 @@ function createNotification(
   relatedId?: string
 ): Notification {
   return {
-    id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    id: createId('notif'),
     userId,
     type,
     title,
@@ -45,6 +88,32 @@ function createNotification(
     createdAt: new Date().toISOString(),
     relatedId
   };
+}
+
+/**
+ * Whether a date range conflicts with the item's blocked dates or with
+ * another approved/active borrow of the same item.
+ */
+function hasDateConflict(
+  state: AppState,
+  itemId: string,
+  startDate: string,
+  endDate: string,
+  excludeRequestId?: string
+): boolean {
+  const item = state.items.find((i) => i.id === itemId);
+  const blockedConflict = (item?.blockedDates ?? []).some((b) =>
+    rangesOverlap(b.startDate, b.endDate, startDate, endDate)
+  );
+  if (blockedConflict) return true;
+
+  return state.borrowRequests.some(
+    (r) =>
+      r.id !== excludeRequestId &&
+      r.itemId === itemId &&
+      (r.status === 'approved' || r.status === 'active') &&
+      rangesOverlap(r.startDate, r.endDate, startDate, endDate)
+  );
 }
 
 // Create the main app store
@@ -72,11 +141,12 @@ function createAppStore() {
 
   return {
     subscribe,
-    set,
-    update,
+
+    /** Test-only escape hatch: replace the whole state. App code must use action methods. */
+    replaceState: (state: AppState) => set(state),
 
     // Reset to initial state
-    reset: () => set(initialAppState),
+    reset: () => set(structuredClone(initialAppState)),
 
     // User actions
     setCurrentUser: (userId: string) => {
@@ -106,19 +176,20 @@ function createAppStore() {
     },
 
     // Borrow request actions
-    createBorrowRequest: (request: BorrowRequest) => {
+    createBorrowRequest: (request: BorrowRequest): ActionResult => {
+      let result: ActionResult = { ok: true };
       update((state) => {
-        // Create notification for lender
         const item = state.items.find((i) => i.id === request.itemId);
         const borrower = state.users.find((u) => u.id === request.borrowerId);
 
-        // Guard against missing data
         if (!item || !borrower) {
-          console.warn('Cannot create notification: missing item or borrower');
-          return {
-            ...state,
-            borrowRequests: [...state.borrowRequests, request]
-          };
+          result = { ok: false, error: 'Item or borrower no longer exists' };
+          return state;
+        }
+
+        if (hasDateConflict(state, request.itemId, request.startDate, request.endDate)) {
+          result = { ok: false, error: 'Those dates conflict with an existing loan or blocked period' };
+          return state;
         }
 
         const notification = createNotification(
@@ -135,76 +206,158 @@ function createAppStore() {
           notifications: [...state.notifications, notification]
         };
       });
+      return result;
     },
 
-    updateBorrowRequest: (requestId: string, updates: Partial<BorrowRequest>) => {
+    approveRequest: (requestId: string): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Request not found' };
       update((state) => {
         const request = state.borrowRequests.find((r) => r.id === requestId);
         if (!request) return state;
 
-        const updatedRequest = { ...request, ...updates };
+        if (request.status !== 'pending') {
+          result = { ok: false, error: 'Only pending requests can be approved' };
+          return state;
+        }
+
         const item = state.items.find((i) => i.id === request.itemId);
+        if (!item) {
+          result = { ok: false, error: 'Item no longer exists' };
+          return state;
+        }
+
+        if (hasDateConflict(state, request.itemId, request.startDate, request.endDate, requestId)) {
+          result = { ok: false, error: 'Those dates conflict with an existing loan or blocked period' };
+          return state;
+        }
+
         const lender = state.users.find((u) => u.id === request.lenderId);
-
-        let notification: Notification | null = null;
-
-        // Create appropriate notification based on status (only if we have required data)
-        if (item && lender) {
-          if (updates.status === 'approved') {
-            notification = createNotification(
+        const notification = lender
+          ? createNotification(
               request.borrowerId,
               'request-approved',
               'Request Approved!',
               `${lender.name} approved your request to borrow ${item.name}`,
               requestId
-            );
-          } else if (updates.status === 'denied') {
-            notification = createNotification(
-              request.borrowerId,
-              'request-denied',
-              'Request Declined',
-              `${lender.name} declined your request to borrow ${item.name}`,
-              requestId
-            );
-          }
-        }
+            )
+          : null;
 
+        result = { ok: true };
         return {
           ...state,
           borrowRequests: state.borrowRequests.map((r) =>
-            r.id === requestId ? updatedRequest : r
+            r.id === requestId ? { ...r, status: 'approved' as const } : r
+          ),
+          items: state.items.map((i) => (i.id === item.id ? { ...i, available: false } : i)),
+          notifications: notification
+            ? [...state.notifications, notification]
+            : state.notifications
+        };
+      });
+      return result;
+    },
+
+    denyRequest: (requestId: string): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Request not found' };
+      update((state) => {
+        const request = state.borrowRequests.find((r) => r.id === requestId);
+        if (!request) return state;
+
+        if (request.status !== 'pending') {
+          result = { ok: false, error: 'Only pending requests can be declined' };
+          return state;
+        }
+
+        const item = state.items.find((i) => i.id === request.itemId);
+        const lender = state.users.find((u) => u.id === request.lenderId);
+        const notification =
+          item && lender
+            ? createNotification(
+                request.borrowerId,
+                'request-denied',
+                'Request Declined',
+                `${lender.name} declined your request to borrow ${item.name}`,
+                requestId
+              )
+            : null;
+
+        result = { ok: true };
+        return {
+          ...state,
+          borrowRequests: state.borrowRequests.map((r) =>
+            r.id === requestId ? { ...r, status: 'denied' as const } : r
           ),
           notifications: notification
             ? [...state.notifications, notification]
             : state.notifications
         };
       });
+      return result;
     },
 
-    // Complete a borrow and move to history
-    completeBorrow: (requestId: string, rating: number, review: string, newCondition?: ItemCondition) => {
+    /** Lender confirms the borrower picked the item up: approved → active. */
+    markPickedUp: (requestId: string): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Request not found' };
       update((state) => {
         const request = state.borrowRequests.find((r) => r.id === requestId);
         if (!request) return state;
 
+        if (request.status !== 'approved') {
+          result = { ok: false, error: 'Only approved requests can be marked as picked up' };
+          return state;
+        }
+
+        result = { ok: true };
+        return {
+          ...state,
+          borrowRequests: state.borrowRequests.map((r) =>
+            r.id === requestId ? { ...r, status: 'active' as const } : r
+          )
+        };
+      });
+      return result;
+    },
+
+    // Complete a borrow and move to history
+    completeBorrow: (requestId: string, rating: number, review: string, newCondition?: ItemCondition): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Request not found' };
+      update((state) => {
+        const request = state.borrowRequests.find((r) => r.id === requestId);
+        if (!request) return state;
+
+        if (request.status !== 'active' && request.status !== 'approved') {
+          result = { ok: false, error: 'Only active loans can be marked as returned' };
+          return state;
+        }
+
         const item = state.items.find((i) => i.id === request.itemId);
         const conditionBefore = item?.condition;
+        const wasUnavailable = item ? !item.available : false;
 
         const history: BorrowHistory = {
-          id: `hist-${Date.now()}`,
+          id: createId('hist'),
           itemId: request.itemId,
           borrowerId: request.borrowerId,
           lenderId: request.lenderId,
           startDate: request.startDate,
           endDate: request.endDate,
-          actualReturnDate: new Date().toISOString().split('T')[0],
+          actualReturnDate: todayLocalISO(),
           rating,
           review,
           conditionBefore,
           conditionAfter: newCondition || conditionBefore
         };
 
-        // Update item rating and condition
+        // The item becomes available again unless another approved/active
+        // loan is still outstanding for it.
+        const stillOnLoan = state.borrowRequests.some(
+          (r) =>
+            r.id !== requestId &&
+            r.itemId === request.itemId &&
+            (r.status === 'approved' || r.status === 'active')
+        );
+
+        // Update item rating, availability, condition, and borrow count
         let updatedItems = state.items;
         if (item) {
           const allItemHistory = [...state.borrowHistory, history].filter(
@@ -221,18 +374,31 @@ function createAppStore() {
               ? {
                   ...i,
                   rating: Math.round(avgRating * 10) / 10,
-                  available: true,
-                  condition: newCondition || i.condition
+                  available: !stillOnLoan,
+                  condition: newCondition || i.condition,
+                  totalBorrows: i.totalBorrows + 1
                 }
               : i
           );
         }
 
-        // Create availability notifications for wishlist subscribers
+        // Keep the users' lending/borrowing counters in sync
+        const updatedUsers = state.users.map((u) => {
+          if (u.id === request.borrowerId) return { ...u, totalBorrows: u.totalBorrows + 1 };
+          if (u.id === request.lenderId) return { ...u, totalLends: u.totalLends + 1 };
+          return u;
+        });
+
+        // Notify wishlist subscribers, but only when the item actually
+        // transitioned back to available and only if they're allowed to see it.
         const wishlistNotifications: Notification[] = [];
-        if (item) {
+        if (item && wasUnavailable && !stillOnLoan) {
           const subscribers = state.wishlist.filter(
-            (w) => w.itemId === item.id && w.notifyOnAvailable && w.userId !== request.borrowerId
+            (w) =>
+              w.itemId === item.id &&
+              w.notifyOnAvailable &&
+              w.userId !== request.borrowerId &&
+              canUserViewItem(item, w.userId, state)
           );
 
           for (const sub of subscribers) {
@@ -248,9 +414,11 @@ function createAppStore() {
           }
         }
 
+        result = { ok: true };
         return {
           ...state,
           items: updatedItems,
+          users: updatedUsers,
           borrowRequests: state.borrowRequests.map((r) =>
             r.id === requestId ? { ...r, status: 'completed' as const } : r
           ),
@@ -258,20 +426,36 @@ function createAppStore() {
           notifications: [...state.notifications, ...wishlistNotifications]
         };
       });
+      return result;
     },
 
     // Nudge lender about pending request
-    nudgeRequest: (requestId: string) => {
+    nudgeRequest: (requestId: string): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Request not found' };
       update((state) => {
         const request = state.borrowRequests.find((r) => r.id === requestId);
         if (!request) return state;
+
+        if (request.status !== 'pending') {
+          result = { ok: false, error: 'Only pending requests can be nudged' };
+          return state;
+        }
+
+        if (request.lastNudgedAt) {
+          const daysSinceNudge =
+            (Date.now() - new Date(request.lastNudgedAt).getTime()) / (1000 * 60 * 60 * 24);
+          if (daysSinceNudge < NUDGE_DELAY_DAYS) {
+            result = { ok: false, error: `You can send another reminder in ${NUDGE_DELAY_DAYS} days` };
+            return state;
+          }
+        }
 
         const item = state.items.find((i) => i.id === request.itemId);
         const borrower = state.users.find((u) => u.id === request.borrowerId);
 
         // Guard against missing data
         if (!item || !borrower) {
-          console.warn('Cannot create nudge notification: missing item or borrower');
+          result = { ok: false, error: 'Item or borrower no longer exists' };
           return state;
         }
 
@@ -283,6 +467,7 @@ function createAppStore() {
           requestId
         );
 
+        result = { ok: true };
         return {
           ...state,
           borrowRequests: state.borrowRequests.map((r) =>
@@ -291,6 +476,7 @@ function createAppStore() {
           notifications: [...state.notifications, notification]
         };
       });
+      return result;
     },
 
     // Tag actions
@@ -333,11 +519,22 @@ function createAppStore() {
     // Friend request actions
     sendFriendRequest: (fromUserId: string, toUserId: string, message?: string) => {
       update((state) => {
-        const toUser = state.users.find((u) => u.id === toUserId);
         const fromUser = state.users.find((u) => u.id === fromUserId);
+        const toUser = state.users.find((u) => u.id === toUserId);
+        if (!fromUser || !toUser) {
+          console.warn('Cannot send friend request: missing user');
+          return state;
+        }
+
+        // Already friends or an identical request is pending — nothing to do
+        const alreadyFriends = fromUser.friendIds.includes(toUserId);
+        const alreadyPending = state.friendRequests.some(
+          (r) => r.fromUserId === fromUserId && r.toUserId === toUserId && r.status === 'pending'
+        );
+        if (alreadyFriends || alreadyPending) return state;
 
         const friendRequest: FriendRequest = {
-          id: `freq-${Date.now()}`,
+          id: createId('freq'),
           fromUserId,
           toUserId,
           status: 'pending',
@@ -345,16 +542,13 @@ function createAppStore() {
           createdAt: new Date().toISOString()
         };
 
-        const notification: Notification = {
-          id: `notif-${Date.now()}`,
-          userId: toUserId,
-          type: 'friend-request',
-          title: 'New Friend Request',
-          message: `${fromUser?.name} sent you a friend request`,
-          read: false,
-          createdAt: new Date().toISOString(),
-          relatedId: friendRequest.id
-        };
+        const notification = createNotification(
+          toUserId,
+          'friend-request',
+          'New Friend Request',
+          `${fromUser.name} sent you a friend request`,
+          friendRequest.id
+        );
 
         return {
           ...state,
@@ -367,19 +561,19 @@ function createAppStore() {
     acceptFriendRequest: (requestId: string) => {
       update((state) => {
         const request = state.friendRequests.find((r) => r.id === requestId);
-        if (!request) return state;
+        if (!request || request.status !== 'pending') return state;
 
         const toUser = state.users.find((u) => u.id === request.toUserId);
 
-        // Add each user to the other's friend list
+        // Add each user to the other's friend list (deduplicated)
         const updatedUsers = state.users.map((user) => {
-          if (user.id === request.fromUserId) {
+          if (user.id === request.fromUserId && !user.friendIds.includes(request.toUserId)) {
             return {
               ...user,
               friendIds: [...user.friendIds, request.toUserId]
             };
           }
-          if (user.id === request.toUserId) {
+          if (user.id === request.toUserId && !user.friendIds.includes(request.fromUserId)) {
             return {
               ...user,
               friendIds: [...user.friendIds, request.fromUserId]
@@ -388,16 +582,13 @@ function createAppStore() {
           return user;
         });
 
-        const notification: Notification = {
-          id: `notif-${Date.now()}`,
-          userId: request.fromUserId,
-          type: 'friend-request-accepted',
-          title: 'Friend Request Accepted',
-          message: `${toUser?.name} accepted your friend request`,
-          read: false,
-          createdAt: new Date().toISOString(),
-          relatedId: requestId
-        };
+        const notification = createNotification(
+          request.fromUserId,
+          'friend-request-accepted',
+          'Friend Request Accepted',
+          `${toUser?.name ?? 'Someone'} accepted your friend request`,
+          requestId
+        );
 
         return {
           ...state,
@@ -410,13 +601,30 @@ function createAppStore() {
       });
     },
 
-    declineFriendRequest: (requestId: string) => {
-      update((state) => ({
-        ...state,
-        friendRequests: state.friendRequests.map((r) =>
-          r.id === requestId ? { ...r, status: 'declined' as const } : r
-        )
-      }));
+    declineFriendRequest: (requestId: string, message?: string) => {
+      update((state) => {
+        const request = state.friendRequests.find((r) => r.id === requestId);
+        if (!request || request.status !== 'pending') return state;
+
+        const toUser = state.users.find((u) => u.id === request.toUserId);
+        const notification = createNotification(
+          request.fromUserId,
+          'friend-request-declined',
+          'Friend Request Declined',
+          message
+            ? `${toUser?.name ?? 'Someone'} declined your friend request: "${message}"`
+            : `${toUser?.name ?? 'Someone'} declined your friend request`,
+          requestId
+        );
+
+        return {
+          ...state,
+          friendRequests: state.friendRequests.map((r) =>
+            r.id === requestId ? { ...r, status: 'declined' as const } : r
+          ),
+          notifications: [...state.notifications, notification]
+        };
+      });
     },
 
     promoteToCloseFriend: (userId: string, friendId: string) => {
@@ -452,6 +660,10 @@ function createAppStore() {
     // Wishlist actions
     addToWishlist: (itemId: string, notifyOnAvailable: boolean = true) => {
       update((state) => {
+        // Only items that exist and are visible to the user can be wishlisted
+        const item = state.items.find((i) => i.id === itemId);
+        if (!item || !canUserViewItem(item, state.currentUserId, state)) return state;
+
         // Check if already in wishlist
         const existing = state.wishlist.find(
           (w) => w.userId === state.currentUserId && w.itemId === itemId
@@ -459,7 +671,7 @@ function createAppStore() {
         if (existing) return state;
 
         const wishlistItem: WishlistItem = {
-          id: `wish-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          id: createId('wish'),
           userId: state.currentUserId,
           itemId,
           notifyOnAvailable,
@@ -545,6 +757,13 @@ export const outgoingRequests = derived(appStore, ($state) =>
   $state.borrowRequests.filter((req) => req.borrowerId === $state.currentUserId)
 );
 
+// Loans the current user has approved but that haven't been picked up yet
+export const approvedLoans = derived(appStore, ($state) =>
+  $state.borrowRequests.filter(
+    (req) => req.lenderId === $state.currentUserId && req.status === 'approved'
+  )
+);
+
 export const activeLoans = derived(appStore, ($state) =>
   $state.borrowRequests.filter(
     (req) => req.lenderId === $state.currentUserId && req.status === 'active'
@@ -585,6 +804,11 @@ export const visibleItems = derived(appStore, ($state) =>
   $state.items.filter((item) => canUserViewItem(item, $state.currentUserId, $state))
 );
 
+// Whether a user is at least a friend of the lender (close friends count too)
+function isFriendOfLender(lender: User, userId: string): boolean {
+  return lender.friendIds.includes(userId) || lender.closeFriendIds.includes(userId);
+}
+
 // Helper function to check if a user can view an item
 export function canUserViewItem(item: Item, currentUserId: string, state: AppState): boolean {
   if (item.lenderId === currentUserId) return true;
@@ -593,24 +817,29 @@ export function canUserViewItem(item: Item, currentUserId: string, state: AppSta
   if (!lender) return false;
 
   switch (item.permissionLevel) {
-    case 'specific-users':
+    case 'specific-users': {
       return item.allowedUserIds?.includes(currentUserId) || false;
-    case 'close-friends':
+    }
+    case 'close-friends': {
       return lender.closeFriendIds.includes(currentUserId);
-    case 'friends':
-      return lender.friendIds.includes(currentUserId);
-    case 'friends-of-friends':
+    }
+    case 'friends': {
+      return isFriendOfLender(lender, currentUserId);
+    }
+    case 'friends-of-friends': {
+      if (isFriendOfLender(lender, currentUserId)) return true;
       // Check if any of user's friends are friends with the lender
       const currentUserData = state.users.find((u) => u.id === currentUserId);
       if (!currentUserData) return false;
-      return (
-        lender.friendIds.includes(currentUserId) ||
-        currentUserData.friendIds.some((friendId) => lender.friendIds.includes(friendId))
-      );
-    case 'neighbors':
-      // For simplicity, all users in same city are neighbors
-      const currentUserAddress = state.users.find((u) => u.id === currentUserId)?.address;
-      return currentUserAddress?.city === lender.address?.city;
+      return currentUserData.friendIds.some((friendId) => lender.friendIds.includes(friendId));
+    }
+    case 'neighbors': {
+      // For simplicity, all users in same city are neighbors.
+      // Both sides need a known city — missing addresses never match.
+      const currentUserCity = state.users.find((u) => u.id === currentUserId)?.address?.city;
+      const lenderCity = lender.address?.city;
+      return !!currentUserCity && currentUserCity === lenderCity;
+    }
     default:
       return false;
   }
@@ -619,9 +848,13 @@ export function canUserViewItem(item: Item, currentUserId: string, state: AppSta
 // Helper to get category path (for breadcrumbs)
 export function getCategoryPath(categoryId: string, state: AppState): string[] {
   const path: string[] = [];
+  const visited = new Set<string>();
   let currentCat = state.categories.find((c) => c.id === categoryId);
 
-  while (currentCat) {
+  // The visited set guards against cyclic parentId chains, which would
+  // otherwise loop forever.
+  while (currentCat && !visited.has(currentCat.id)) {
+    visited.add(currentCat.id);
     path.unshift(currentCat.name);
     currentCat = currentCat.parentId
       ? state.categories.find((c) => c.id === currentCat!.parentId)

@@ -1,11 +1,11 @@
 <script lang="ts">
   import { appStore, incomingFriendRequests } from '$lib/store';
   import Toast from '$lib/components/Toast.svelte';
-  import { TOAST_DURATION_MS } from '$lib/constants';
+  import { useToast } from '$lib/useToast.svelte';
   import type { FriendRequest } from '$lib/types';
 
   let currentUser = $derived($appStore.users.find((u) => u.id === $appStore.currentUserId));
-  let toast = $state<{ message: string; type: 'success' | 'error' } | null>(null);
+  const toaster = useToast();
 
   // Outgoing friend requests
   let outgoingFriendRequests = $derived(
@@ -71,20 +71,17 @@
     );
 
     if (existingRequest) {
-      toast = { message: 'Friend request already exists', type: 'error' };
-      setTimeout(() => (toast = null), TOAST_DURATION_MS);
+      toaster.showToast('Friend request already exists', 'error');
       return;
     }
 
     appStore.sendFriendRequest(currentUser.id, toUserId);
-    toast = { message: 'Friend request sent!', type: 'success' };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    toaster.showToast('Friend request sent!', 'success');
   }
 
   function acceptFriendRequest(requestId: string) {
     appStore.acceptFriendRequest(requestId);
-    toast = { message: 'Friend request accepted!', type: 'success' };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    toaster.showToast('Friend request accepted!', 'success');
   }
 
   function openDeclineModal(requestId: string) {
@@ -101,10 +98,8 @@
 
   function confirmDecline() {
     if (!declineRequestId) return;
-    // TODO: Update declineFriendRequest to accept optional message
-    appStore.declineFriendRequest(declineRequestId);
-    toast = { message: 'Friend request declined', type: 'success' };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    appStore.declineFriendRequest(declineRequestId, declineMessage.trim() || undefined);
+    toaster.showToast('Friend request declined', 'info');
     cancelDecline();
   }
 
@@ -125,15 +120,13 @@
   function promoteToCloseFriend(friendId: string) {
     if (!currentUser) return;
     appStore.promoteToCloseFriend(currentUser.id, friendId);
-    toast = { message: 'Promoted to close friend!', type: 'success' };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    toaster.showToast('Promoted to close friend!', 'success');
   }
 
   function demoteFromCloseFriend(friendId: string) {
     if (!currentUser) return;
     appStore.demoteFromCloseFriend(currentUser.id, friendId);
-    toast = { message: 'Removed from close friends', type: 'success' };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    toaster.showToast('Removed from close friends', 'success');
   }
 
   // Helper to check if friend request already sent
@@ -569,8 +562,8 @@
   </div>
 {/if}
 
-{#if toast}
-  <Toast message={toast.message} type={toast.type} onClose={() => (toast = null)} />
+{#if toaster.toast}
+  <Toast message={toaster.toast.message} type={toaster.toast.type} onClose={toaster.clearToast} />
 {/if}
 
 <style>

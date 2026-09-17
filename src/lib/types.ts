@@ -101,7 +101,7 @@ export interface WishlistItem {
 export interface Notification {
   id: string;
   userId: string;
-  type: 'borrow-request' | 'request-approved' | 'request-denied' | 'return-reminder' | 'item-returned' | 'friend-request' | 'friend-request-accepted' | 'request-nudge' | 'wishlist-available';
+  type: 'borrow-request' | 'request-approved' | 'request-denied' | 'return-reminder' | 'item-returned' | 'friend-request' | 'friend-request-accepted' | 'friend-request-declined' | 'request-nudge' | 'wishlist-available';
   title: string;
   message: string;
   read: boolean;

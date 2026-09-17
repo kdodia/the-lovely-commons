@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { toLocalISODate, parseLocalDate, startOfLocalDay, rangesOverlap } from '$lib/dates';
+
   interface DateInfo {
     date: Date;
     dateStr: string;
@@ -27,21 +29,38 @@
     startDate = '',
     endDate = '',
     onDateSelect,
-    minDate = new Date()
+    minDate = startOfLocalDay()
   }: Props = $props();
 
   // Current view state
   let viewDate = $state(new Date());
   let selectingEndDate = $state(false);
   let hoverDate = $state<string | null>(null);
+  let conflictMessage = $state<string | null>(null);
+
+  // Normalize minDate to local midnight so "today" isn't treated as past
+  // when a caller passes a Date carrying the current wall-clock time.
+  let minDay = $derived(startOfLocalDay(minDate));
+
+  // When the parent clears the selection (e.g. the request form is
+  // cancelled), leave selection mode instead of staying stuck in it.
+  $effect(() => {
+    if (!startDate) {
+      selectingEndDate = false;
+      hoverDate = null;
+    }
+  });
+
+  // Show the month containing a selection the parent pre-filled.
+  $effect(() => {
+    if (startDate) {
+      const start = parseLocalDate(startDate);
+      viewDate = new Date(start.getFullYear(), start.getMonth(), 1);
+    }
+  });
 
   // Day names for header
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-  // Helper to format date as YYYY-MM-DD
-  function formatDate(date: Date): string {
-    return date.toISOString().split('T')[0];
-  }
 
   // Helper to check if a date is within any booked period
   function isDateBooked(dateStr: string): boolean {
@@ -89,8 +108,8 @@
 
     const currentDate = new Date(startDate_);
     while (currentDate <= endDate_) {
-      const dateStr = formatDate(currentDate);
-      const isPast = currentDate < minDate;
+      const dateStr = toLocalISODate(currentDate);
+      const isPast = currentDate < minDay;
       const isBooked = isDateBooked(dateStr);
       const isBlocked_ = isDateBlocked(dateStr);
 
@@ -134,7 +153,7 @@
   // Check if prev month button should be disabled
   let canGoPrev = $derived.by(() => {
     const prevMonthEnd = new Date(viewDate.getFullYear(), viewDate.getMonth(), 0);
-    return prevMonthEnd >= minDate;
+    return prevMonthEnd >= minDay;
   });
 
   // Date selection
@@ -143,25 +162,23 @@
 
     if (!startDate || (startDate && endDate) || (selectingEndDate && day.dateStr < startDate)) {
       // Start new selection
+      conflictMessage = null;
       onDateSelect?.(day.dateStr, null);
       selectingEndDate = true;
-    } else if (selectingEndDate) {
-      // Complete the selection
-      if (day.dateStr > startDate) {
-        // Check if any booked/blocked dates are in the range
-        const hasConflict = calendarDays.some(
-          (d) =>
-            d.dateStr > startDate &&
-            d.dateStr < day.dateStr &&
-            (d.isBooked || d.isBlocked)
-        );
-        if (hasConflict) {
-          // Can't select a range that spans booked/blocked dates
-          return;
-        }
-        onDateSelect?.(startDate, day.dateStr);
-        selectingEndDate = false;
+    } else if (selectingEndDate && day.dateStr >= startDate) {
+      // Complete the selection (same-day borrows are allowed). Check the full
+      // range against every booked/blocked period, not just the days rendered
+      // in the current month, so cross-month conflicts are caught too.
+      const hasConflict = [...bookedDates, ...blockedDates].some((period) =>
+        rangesOverlap(period.startDate, period.endDate, startDate, day.dateStr)
+      );
+      if (hasConflict) {
+        conflictMessage = 'That range includes booked or blocked days — please pick different dates.';
+        return;
       }
+      conflictMessage = null;
+      onDateSelect?.(startDate, day.dateStr);
+      selectingEndDate = false;
     }
   }
 
@@ -179,6 +196,7 @@
     onDateSelect?.('', null);
     selectingEndDate = false;
     hoverDate = null;
+    conflictMessage = null;
   }
 </script>
 
@@ -255,23 +273,29 @@
     </div>
   </div>
 
+  {#if conflictMessage}
+    <div class="conflict-message" role="alert">
+      <span aria-hidden="true">⚠️</span> {conflictMessage}
+    </div>
+  {/if}
+
   {#if startDate}
     <div class="selection-summary">
       <div class="selection-info">
         <span class="selection-label">Selected:</span>
         <span class="selection-dates">
-          {new Date(startDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+          {parseLocalDate(startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
           {#if endDate}
             <span aria-hidden="true"> &rarr; </span>
-            {new Date(endDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            {parseLocalDate(endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
           {:else}
-            <span class="select-end-hint">(click to select end date)</span>
+            <span class="select-end-hint">(click to select end date — same day is fine)</span>
           {/if}
         </span>
       </div>
       <button type="button" class="clear-btn" onclick={clearSelection}>Clear</button>
     </div>
-  {:else if selectingEndDate}
+  {:else}
     <div class="selection-hint">
       Click a date to start your selection
     </div>
@@ -544,6 +568,15 @@
     font-size: 0.875rem;
     color: var(--text-muted);
     background-color: var(--surface);
+    border-radius: var(--radius);
+  }
+
+  .conflict-message {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    font-size: 0.875rem;
+    color: var(--error);
+    background-color: rgba(239, 68, 68, 0.1);
     border-radius: var(--radius);
   }
 

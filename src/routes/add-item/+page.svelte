@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { appStore } from '$lib/store';
+  import { appStore, createId } from '$lib/store';
   import { goto } from '$app/navigation';
   import Toast from '$lib/components/Toast.svelte';
   import type { Item, PermissionLevel } from '$lib/types';
-  import { TOAST_DURATION_MS } from '$lib/constants';
+  import { useToast } from '$lib/useToast.svelte';
 
   let name = $state('');
   let description = $state('');
@@ -12,7 +12,7 @@
   let subcategoryId = $state('');
   let condition = $state<'excellent' | 'good' | 'fair' | 'poor'>('good');
   let permissionLevel = $state<PermissionLevel>('friends');
-  let toast = $state<{ message: string; type: 'success' | 'error' } | null>(null);
+  const toaster = useToast();
 
   // Get all categories for dropdown
   let topLevelCategories = $derived($appStore.categories.filter((c) => !c.parentId));
@@ -35,13 +35,12 @@
 
   function handleSubmit() {
     if (!isValid) {
-      toast = { message: 'Please fill in all required fields', type: 'error' };
-      setTimeout(() => (toast = null), TOAST_DURATION_MS);
+      toaster.showToast('Please fill in all required fields', 'error');
       return;
     }
 
     const newItem: Item = {
-      id: `item-${Date.now()}`,
+      id: createId('item'),
       name: name.trim(),
       description: description.trim(),
       categoryId,
@@ -58,7 +57,7 @@
     };
 
     appStore.addItem(newItem);
-    toast = { message: 'Item added successfully!', type: 'success' };
+    toaster.showToast('Item added successfully!', 'success');
 
     setTimeout(() => {
       goto('/my-items');
@@ -236,8 +235,8 @@
   </div>
 </div>
 
-{#if toast}
-  <Toast message={toast.message} type={toast.type} onClose={() => (toast = null)} />
+{#if toaster.toast}
+  <Toast message={toaster.toast.message} type={toaster.toast.type} onClose={toaster.clearToast} />
 {/if}
 
 <style>

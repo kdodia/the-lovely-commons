@@ -15,13 +15,16 @@
   let showSuggestions = $state(false);
   let searchInputFocused = $state(false);
 
-  // Debounce search input
-  let searchTimeout: number;
+  // Debounce search input. Reading searchQuery synchronously here is what
+  // registers it as a dependency — reading it only inside the timeout
+  // callback would leave this effect with nothing to react to, so it would
+  // run exactly once and the grid would never filter.
   $effect(() => {
-    clearTimeout(searchTimeout);
-    searchTimeout = window.setTimeout(() => {
-      debouncedSearchQuery = searchQuery;
+    const query = searchQuery;
+    const timeout = setTimeout(() => {
+      debouncedSearchQuery = query;
     }, 300); // 300ms debounce delay
+    return () => clearTimeout(timeout);
   });
 
   // Fuzzy search scoring - returns a score (higher = better match), or -1 for no match

@@ -3,8 +3,9 @@
   import { appStore } from '$lib/store';
   import { goto } from '$app/navigation';
   import Toast from '$lib/components/Toast.svelte';
-  import type { Item, PermissionLevel } from '$lib/types';
-  import { TOAST_DURATION_MS } from '$lib/constants';
+  import type { PermissionLevel } from '$lib/types';
+  import { formatDisplayDate, todayLocalISO } from '$lib/dates';
+  import { useToast } from '$lib/useToast.svelte';
 
   let itemId = $derived($page.params.id);
   let item = $derived($appStore.items.find((i) => i.id === itemId));
@@ -32,36 +33,34 @@
   let blockedDates = $state<Array<{ startDate: string; endDate: string; reason?: string }>>(
     item?.blockedDates || []
   );
-  let toast = $state<{ message: string; type: 'success' | 'error' } | null>(null);
-
-  // Update form when item changes
-  $effect(() => {
-    if (item) {
-      name = item.name;
-      description = item.description;
-      imageUrl = item.imageUrl;
-      condition = item.condition;
-      permissionLevel = item.permissionLevel;
-      blockedDates = item.blockedDates || [];
-    }
-  });
+  const toaster = useToast();
 
   // Category state
   let parentCategoryId = $state('');
   let subcategoryId = $state('');
 
-  // Initialize category state from item
+  // Populate the form when a different item is loaded. Keying on the item id
+  // (rather than the item object) means a background state update — e.g.
+  // cross-tab sync — won't clobber unsaved edits mid-form.
+  let syncedItemId = $state<string | null>(null);
   $effect(() => {
-    if (item) {
-      const category = $appStore.categories.find((c) => c.id === item.categoryId);
-      if (category) {
-        if (category.parentId) {
-          parentCategoryId = category.parentId;
-          subcategoryId = category.id;
-        } else {
-          parentCategoryId = category.id;
-          subcategoryId = '';
-        }
+    if (!item || item.id === syncedItemId) return;
+    syncedItemId = item.id;
+    name = item.name;
+    description = item.description;
+    imageUrl = item.imageUrl;
+    condition = item.condition;
+    permissionLevel = item.permissionLevel;
+    blockedDates = item.blockedDates || [];
+
+    const category = $appStore.categories.find((c) => c.id === item.categoryId);
+    if (category) {
+      if (category.parentId) {
+        parentCategoryId = category.parentId;
+        subcategoryId = category.id;
+      } else {
+        parentCategoryId = category.id;
+        subcategoryId = '';
       }
     }
   });
@@ -88,15 +87,13 @@
 
   function addBlockedDate() {
     if (!blockStartDate || !blockEndDate) {
-      toast = { message: 'Please select both start and end dates', type: 'error' };
-      setTimeout(() => (toast = null), TOAST_DURATION_MS);
+      toaster.showToast('Please select both start and end dates', 'error');
       return;
     }
 
-    // Validate that end date is after start date
-    if (new Date(blockEndDate) < new Date(blockStartDate)) {
-      toast = { message: 'End date must be after start date', type: 'error' };
-      setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    // Validate that the range is ordered (same-day blocks are allowed)
+    if (blockEndDate < blockStartDate) {
+      toaster.showToast('End date must not be before start date', 'error');
       return;
     }
 
@@ -115,22 +112,19 @@
     blockReason = '';
     showDateBlockForm = false;
 
-    toast = { message: 'Date blocked successfully', type: 'success' };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    toaster.showToast('Date block added — save changes to apply it', 'info');
   }
 
   function removeBlockedDate(index: number) {
     blockedDates = blockedDates.filter((_, i) => i !== index);
-    toast = { message: 'Date block removed', type: 'success' };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    toaster.showToast('Date block removed — save changes to apply it', 'info');
   }
 
   function handleSubmit() {
     if (!item) return;
 
     if (!name.trim() || !description.trim() || !imageUrl.trim() || !categoryId) {
-      toast = { message: 'Please fill in all required fields', type: 'error' };
-      setTimeout(() => (toast = null), TOAST_DURATION_MS);
+      toaster.showToast('Please fill in all required fields', 'error');
       return;
     }
 
@@ -144,7 +138,7 @@
       blockedDates: blockedDates.length > 0 ? blockedDates : undefined
     });
 
-    toast = { message: 'Item updated successfully!', type: 'success' };
+    toaster.showToast('Item updated successfully!', 'success');
     setTimeout(() => {
       goto(`/items/${item.id}`);
     }, 1000);
@@ -338,7 +332,7 @@
                       type="date"
                       id="block-start"
                       bind:value={blockStartDate}
-                      min={new Date().toISOString().split('T')[0]}
+                      min={todayLocalISO()}
                     />
                   </div>
                   <div class="form-group">
@@ -347,7 +341,7 @@
                       type="date"
                       id="block-end"
                       bind:value={blockEndDate}
-                      min={blockStartDate || new Date().toISOString().split('T')[0]}
+                      min={blockStartDate || todayLocalISO()}
                     />
                   </div>
                 </div>
@@ -374,7 +368,7 @@
                       <span class="blocked-date-icon" aria-hidden="true">🚫</span>
                       <div>
                         <div class="blocked-date-range">
-                          {new Date(block.startDate).toLocaleDateString()} - {new Date(block.endDate).toLocaleDateString()}
+                          {formatDisplayDate(block.startDate)} - {formatDisplayDate(block.endDate)}
                         </div>
                         {#if block.reason}
                           <div class="blocked-date-reason">{block.reason}</div>
@@ -410,8 +404,8 @@
   </div>
 {/if}
 
-{#if toast}
-  <Toast message={toast.message} type={toast.type} onClose={() => (toast = null)} />
+{#if toaster.toast}
+  <Toast message={toaster.toast.message} type={toaster.toast.type} onClose={toaster.clearToast} />
 {/if}
 
 <style>

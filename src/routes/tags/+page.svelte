@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { appStore } from '$lib/store';
+  import { appStore, createId } from '$lib/store';
   import Toast from '$lib/components/Toast.svelte';
   import type { Tag } from '$lib/types';
-  import { TOAST_DURATION_MS } from '$lib/constants';
+  import { useToast } from '$lib/useToast.svelte';
 
   let showCreateForm = $state(false);
   let newTagName = $state('');
   let selectedTagId = $state<string | null>(null);
-  let toast = $state<{ message: string; type: 'success' | 'error' } | null>(null);
+  const toaster = useToast();
 
   let userTags = $derived(
     $appStore.tags.filter((tag) => tag.createdBy === $appStore.currentUserId)
@@ -35,33 +35,29 @@
     if (!newTagName.trim()) return;
 
     const tag: Tag = {
-      id: `tag-${Date.now()}`,
+      id: createId('tag'),
       name: newTagName.trim(),
       createdBy: $appStore.currentUserId,
       itemIds: []
     };
 
     appStore.createTag(tag);
-    toast = { message: 'Tag created!', type: 'success' };
+    toaster.showToast('Tag created!', 'success');
     newTagName = '';
     showCreateForm = false;
     selectedTagId = tag.id;
-
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
   }
 
   function addItemToTag(itemId: string) {
     if (!selectedTagId) return;
     appStore.addItemToTag(selectedTagId, itemId);
-    toast = { message: 'Item added to tag!', type: 'success' };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    toaster.showToast('Item added to tag!', 'success');
   }
 
   function removeItemFromTag(itemId: string) {
     if (!selectedTagId) return;
     appStore.removeItemFromTag(selectedTagId, itemId);
-    toast = { message: 'Item removed from tag', type: 'success' };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    toaster.showToast('Item removed from tag', 'success');
   }
 </script>
 
@@ -197,8 +193,8 @@
   </div>
 </div>
 
-{#if toast}
-  <Toast message={toast.message} type={toast.type} onClose={() => (toast = null)} />
+{#if toaster.toast}
+  <Toast message={toaster.toast.message} type={toaster.toast.type} onClose={toaster.clearToast} />
 {/if}
 
 <style>

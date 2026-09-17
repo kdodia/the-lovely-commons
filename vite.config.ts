@@ -1,7 +1,7 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vitest/config';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
 	plugins: [sveltekit()],
 	test: {
 		include: ['src/**/*.{test,spec}.{js,ts}'],
@@ -21,8 +21,8 @@ export default defineConfig({
 			}
 		}
 	},
-	// Ensure browser conditions for tests
-	resolve: {
-		conditions: ['browser']
-	}
-});
+	// Browser resolve conditions are needed for Svelte 5 under jsdom, but only
+	// while running Vitest (mode === 'test') — applying them to dev/build would
+	// override Vite's default condition list for real builds.
+	resolve: mode === 'test' ? { conditions: ['browser'] } : undefined
+}));

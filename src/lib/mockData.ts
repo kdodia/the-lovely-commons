@@ -1,4 +1,15 @@
-import type { User, Item, Category, Tag, BorrowRequest, BorrowHistory, FriendRequest, AppState } from './types';
+import type { User, Item, Category, Tag, BorrowRequest, BorrowHistory, FriendRequest, Notification, AppState } from './types';
+import { addDays, toLocalISODate } from './dates';
+
+// Mock dates are generated relative to today so a fresh install always shows
+// a live-looking app (pending requests, an active loan, recent history)
+// instead of everything appearing months overdue.
+const daysFromNow = (days: number): string => toLocalISODate(addDays(new Date(), days));
+const timestampDaysAgo = (days: number, hour = 10): string => {
+  const d = addDays(new Date(), -days);
+  d.setHours(hour, 0, 0, 0);
+  return d.toISOString();
+};
 
 // Mock users
 export const mockUsers: User[] = [
@@ -30,7 +41,7 @@ export const mockUsers: User[] = [
       lng: -122.4094,
       city: 'San Francisco'
     },
-    friendIds: ['user1', 'user3'],
+    friendIds: ['user1', 'user3', 'user5'],
     closeFriendIds: ['user1'],
     rating: 4.9,
     totalBorrows: 15,
@@ -47,7 +58,7 @@ export const mockUsers: User[] = [
       lng: -122.4294,
       city: 'San Francisco'
     },
-    friendIds: ['user1', 'user2', 'user4'],
+    friendIds: ['user1', 'user2', 'user4', 'user5'],
     closeFriendIds: ['user1'],
     rating: 4.7,
     totalBorrows: 28,
@@ -64,7 +75,7 @@ export const mockUsers: User[] = [
       lng: -122.4394,
       city: 'San Francisco'
     },
-    friendIds: ['user1', 'user3'],
+    friendIds: ['user1', 'user3', 'user7'],
     closeFriendIds: [],
     rating: 4.6,
     totalBorrows: 19,
@@ -386,6 +397,37 @@ export const mockItems: Item[] = [
     totalBorrows: 8,
     available: true,
     createdAt: '2024-02-28T10:00:00Z'
+  },
+  {
+    id: 'item16',
+    name: 'Sewing Machine',
+    description: 'Brother sewing machine with accessories. Great for repairs and small projects.',
+    categoryId: 'cat2-2',
+    lenderId: 'user6',
+    imageUrl: 'https://images.unsplash.com/photo-1605117882932-f9e32b03fea9?w=400',
+    condition: 'excellent',
+    permissionLevel: 'neighbors',
+    tagIds: [],
+    rating: 4.8,
+    totalBorrows: 3,
+    available: true,
+    createdAt: '2024-03-15T10:00:00Z'
+  },
+  {
+    id: 'item17',
+    name: 'Celestron Telescope',
+    description: 'NexStar 6SE computerized telescope. Handle with care — shared with trusted friends only.',
+    categoryId: 'cat4',
+    lenderId: 'user2',
+    imageUrl: 'https://images.unsplash.com/photo-1522124624696-7ea32eb9592c?w=400',
+    condition: 'excellent',
+    permissionLevel: 'specific-users',
+    allowedUserIds: ['user1', 'user3'],
+    tagIds: [],
+    rating: 5.0,
+    totalBorrows: 2,
+    available: true,
+    createdAt: '2024-03-20T10:00:00Z'
   }
 ];
 
@@ -396,92 +438,105 @@ export const mockBorrowRequests: BorrowRequest[] = [
     itemId: 'item4',
     borrowerId: 'user1',
     lenderId: 'user2',
-    startDate: '2025-11-15',
-    endDate: '2025-11-17',
+    startDate: daysFromNow(3),
+    endDate: daysFromNow(5),
     status: 'pending',
     message: 'Need to hang some shelves this weekend!',
-    createdAt: '2025-11-12T14:30:00Z'
+    createdAt: timestampDaysAgo(2, 14)
   },
   {
     id: 'req2',
     itemId: 'item10',
     borrowerId: 'user2',
     lenderId: 'user3',
-    startDate: '2025-11-20',
-    endDate: '2025-11-21',
+    startDate: daysFromNow(8),
+    endDate: daysFromNow(9),
     status: 'pending',
     message: 'Planning a movie night for my birthday!',
-    createdAt: '2025-11-12T16:00:00Z'
+    createdAt: timestampDaysAgo(1, 16)
   },
   {
     id: 'req3',
     itemId: 'item3',
     borrowerId: 'user2',
     lenderId: 'user1',
-    startDate: '2025-11-10',
-    endDate: '2025-11-18',
+    startDate: daysFromNow(-4),
+    endDate: daysFromNow(3),
     status: 'active',
-    message: 'Making a big batch of pesto for the holidays!',
-    createdAt: '2025-11-08T10:00:00Z'
+    message: 'Making a big batch of pesto for a party!',
+    createdAt: timestampDaysAgo(6)
+  },
+  {
+    id: 'req4',
+    itemId: 'item1',
+    borrowerId: 'user3',
+    lenderId: 'user1',
+    startDate: daysFromNow(4),
+    endDate: daysFromNow(6),
+    status: 'pending',
+    message: 'Meal prepping for the week — would this weekend work?',
+    createdAt: timestampDaysAgo(1, 9)
   }
 ];
 
-// Mock borrow history
+// Mock borrow history.
+// Note: in the current flow the lender writes the rating/review when marking
+// an item returned, so these are written in the lender's voice.
 export const mockBorrowHistory: BorrowHistory[] = [
   {
     id: 'hist1',
     itemId: 'item1',
     borrowerId: 'user2',
     lenderId: 'user1',
-    startDate: '2025-10-01',
-    endDate: '2025-10-05',
-    actualReturnDate: '2025-10-05',
+    startDate: daysFromNow(-45),
+    endDate: daysFromNow(-41),
+    actualReturnDate: daysFromNow(-41),
     rating: 5,
-    review: 'Amazing Instant Pot! Made perfect rice every time.'
+    review: 'Marcus returned it spotless and right on time. Happy to lend again!'
   },
   {
     id: 'hist2',
     itemId: 'item4',
     borrowerId: 'user3',
     lenderId: 'user2',
-    startDate: '2025-10-10',
-    endDate: '2025-10-12',
-    actualReturnDate: '2025-10-12',
+    startDate: daysFromNow(-38),
+    endDate: daysFromNow(-36),
+    actualReturnDate: daysFromNow(-36),
     rating: 5,
-    review: 'Great drill, very powerful and easy to use!'
+    review: 'Smooth handoff, drill came back with every bit accounted for.'
   },
   {
     id: 'hist3',
     itemId: 'item10',
     borrowerId: 'user1',
     lenderId: 'user3',
-    startDate: '2025-09-15',
-    endDate: '2025-09-16',
-    actualReturnDate: '2025-09-16',
+    startDate: daysFromNow(-60),
+    endDate: daysFromNow(-59),
+    actualReturnDate: daysFromNow(-59),
     rating: 5,
-    review: 'Perfect for movie night! Great picture quality.'
+    review: 'Sarah took great care of the projector. Easy lend!'
   },
   {
     id: 'hist4',
     itemId: 'item6',
     borrowerId: 'user1',
     lenderId: 'user4',
-    startDate: '2025-08-20',
-    endDate: '2025-08-23',
-    actualReturnDate: '2025-08-23',
+    startDate: daysFromNow(-85),
+    endDate: daysFromNow(-82),
+    actualReturnDate: daysFromNow(-82),
     rating: 4,
-    review: 'Tent worked well, easy to set up!'
+    review: 'Tent came back clean, just a little late on the return.'
   },
   {
     id: 'hist5',
     itemId: 'item9',
     borrowerId: 'user4',
     lenderId: 'user2',
-    startDate: '2025-09-05',
-    endDate: '2025-09-06',
-    actualReturnDate: '2025-09-06',
+    startDate: daysFromNow(-70),
+    endDate: daysFromNow(-69),
+    actualReturnDate: daysFromNow(-69),
     rating: 5,
-    review: 'Cleaned my entire driveway! Super powerful.'
+    review: 'Alex even topped off the detergent tank. Model borrower!'
   }
 ];
 
@@ -493,7 +548,7 @@ export const mockFriendRequests: FriendRequest[] = [
     toUserId: 'user1',
     status: 'pending',
     message: 'Hey Sarah! I love your camping gear collection. Would love to connect!',
-    createdAt: '2025-11-15T14:30:00Z'
+    createdAt: timestampDaysAgo(2, 14)
   },
   {
     id: 'freq2',
@@ -501,7 +556,62 @@ export const mockFriendRequests: FriendRequest[] = [
     toUserId: 'user1',
     status: 'pending',
     message: 'Hi! Just moved to the neighborhood and saw you have some great kitchen items.',
-    createdAt: '2025-11-16T09:15:00Z'
+    createdAt: timestampDaysAgo(1, 9)
+  }
+];
+
+// Seed notifications matching the pending activity above, so the bell badge
+// agrees with what the dashboard and network pages show on first load.
+export const mockNotifications: Notification[] = [
+  {
+    id: 'notif-seed-1',
+    userId: 'user1',
+    type: 'borrow-request',
+    title: 'New Borrow Request',
+    message: 'Emily Rodriguez wants to borrow your Instant Pot Duo 8Qt',
+    read: false,
+    createdAt: timestampDaysAgo(1, 9),
+    relatedId: 'req4'
+  },
+  {
+    id: 'notif-seed-2',
+    userId: 'user1',
+    type: 'friend-request',
+    title: 'New Friend Request',
+    message: 'Jordan Lee sent you a friend request',
+    read: false,
+    createdAt: timestampDaysAgo(2, 14),
+    relatedId: 'freq1'
+  },
+  {
+    id: 'notif-seed-3',
+    userId: 'user1',
+    type: 'friend-request',
+    title: 'New Friend Request',
+    message: 'Taylor Martinez sent you a friend request',
+    read: false,
+    createdAt: timestampDaysAgo(1, 9),
+    relatedId: 'freq2'
+  },
+  {
+    id: 'notif-seed-4',
+    userId: 'user2',
+    type: 'borrow-request',
+    title: 'New Borrow Request',
+    message: 'Sarah Chen wants to borrow your Cordless Drill Set',
+    read: false,
+    createdAt: timestampDaysAgo(2, 14),
+    relatedId: 'req1'
+  },
+  {
+    id: 'notif-seed-5',
+    userId: 'user3',
+    type: 'borrow-request',
+    title: 'New Borrow Request',
+    message: 'Marcus Johnson wants to borrow your Epson Home Projector',
+    read: false,
+    createdAt: timestampDaysAgo(1, 16),
+    relatedId: 'req2'
   }
 ];
 
@@ -515,6 +625,6 @@ export const initialAppState: AppState = {
   borrowRequests: mockBorrowRequests,
   borrowHistory: mockBorrowHistory,
   friendRequests: mockFriendRequests,
-  notifications: [],
+  notifications: mockNotifications,
   wishlist: []
 };

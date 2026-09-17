@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { fly } from 'svelte/transition';
 
   interface Props {
@@ -12,15 +11,24 @@
   let { message, type = 'info', duration = 3000, onClose }: Props = $props();
 
   let visible = $state(true);
+  let exitTimer: ReturnType<typeof setTimeout> | undefined;
 
-  onMount(() => {
-    const timer = setTimeout(() => {
-      visible = false;
-      setTimeout(() => onClose?.(), 300);
-    }, duration);
+  function dismiss() {
+    visible = false;
+    // Let the exit transition play before telling the parent to clear state
+    exitTimer = setTimeout(() => onClose?.(), 300);
+  }
 
+  // (Re)start the auto-dismiss timer whenever a new message arrives, so a
+  // toast shown while a previous one is on screen gets its full duration.
+  $effect(() => {
+    void message;
+    visible = true;
+    const timer = setTimeout(dismiss, duration);
     return () => clearTimeout(timer);
   });
+
+  $effect(() => () => clearTimeout(exitTimer));
 
   const icons = {
     success: '✅',
@@ -31,10 +39,10 @@
 </script>
 
 {#if visible}
-  <div class="toast toast-{type}" transition:fly={{ y: -20, duration: 300 }} role="alert" aria-live="polite">
+  <div class="toast toast-{type}" transition:fly={{ y: -20, duration: 300 }} role="alert">
     <span class="toast-icon" aria-hidden="true">{icons[type]}</span>
     <span class="toast-message">{message}</span>
-    <button class="toast-close" onclick={() => (visible = false)} aria-label="Close notification">×</button>
+    <button class="toast-close" onclick={dismiss} aria-label="Close notification">×</button>
   </div>
 {/if}
 

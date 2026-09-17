@@ -2,6 +2,7 @@
   import { page } from '$app/stores';
   import { appStore, canUserViewItem } from '$lib/store';
   import ItemCard from '$lib/components/ItemCard.svelte';
+  import { formatDisplayDate } from '$lib/dates';
 
   let userId = $derived($page.params.id);
   let user = $derived($appStore.users.find((u) => u.id === userId));
@@ -19,10 +20,18 @@
     $appStore.borrowHistory.filter((h) => h.borrowerId === userId || h.lenderId === userId)
   );
 
-  // Get all borrow requests for this user (pending, approved, denied, active, cancelled)
+  // In-flight borrow requests for this user. Completed requests are excluded
+  // (their BorrowHistory entry already represents them), and another user's
+  // pending/denied requests are private — a visitor only sees requests they
+  // are themselves a party to.
   let borrowRequests = $derived(
     $appStore.borrowRequests.filter(
-      (r) => r.borrowerId === userId || r.lenderId === userId
+      (r) =>
+        (r.borrowerId === userId || r.lenderId === userId) &&
+        r.status !== 'completed' &&
+        (userId === $appStore.currentUserId ||
+          r.borrowerId === $appStore.currentUserId ||
+          r.lenderId === $appStore.currentUserId)
     )
   );
 
@@ -177,11 +186,13 @@
                         <span class="badge badge-error">Declined</span>
                       {:else if status === 'cancelled'}
                         <span class="badge">Cancelled</span>
+                      {:else if status === 'completed' && isRequest}
+                        <span class="badge badge-primary">Returned</span>
                       {/if}
                     </div>
                     <div class="history-date">
                       {#if status === 'active' || status === 'approved'}
-                        Return by: {new Date(activity.endDate).toLocaleDateString('en-US', {
+                        Return by: {formatDisplayDate(activity.endDate, {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric'
@@ -199,7 +210,7 @@
                           year: 'numeric'
                         })}
                       {:else}
-                        {new Date(activity.endDate).toLocaleDateString('en-US', {
+                        {formatDisplayDate(activity.endDate, {
                           month: 'short',
                           year: 'numeric'
                         })}

@@ -1,7 +1,8 @@
 <script lang="ts">
   import '../app.css';
   import { page } from '$app/stores';
-  import { appStore, currentUser, unreadNotificationsCount } from '$lib/store';
+  import { appStore, currentUser, unreadNotificationsCount, STORAGE_KEY } from '$lib/store';
+  import FallbackImage from '$lib/components/FallbackImage.svelte';
 
   let { children } = $props();
 
@@ -22,7 +23,8 @@
   }
 
   function confirmReset() {
-    localStorage.removeItem('distributed-library-app-state');
+    localStorage.removeItem(STORAGE_KEY);
+    appStore.reset();
     window.location.reload();
   }
 
@@ -42,6 +44,34 @@
     if (showResetConfirm && resetModalElement) {
       resetModalElement.focus();
     }
+  });
+
+  // User switcher (demo affordance: lets you experience each permission tier)
+  let showUserMenu = $state(false);
+  let userMenuElement = $state<HTMLDivElement | undefined>();
+
+  function switchUser(userId: string) {
+    appStore.setCurrentUser(userId);
+    showUserMenu = false;
+  }
+
+  // Close the user menu on outside click or Escape
+  $effect(() => {
+    if (!showUserMenu) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (userMenuElement && !userMenuElement.contains(e.target as Node)) {
+        showUserMenu = false;
+      }
+    };
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') showUserMenu = false;
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeydown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeydown);
+    };
   });
 </script>
 
@@ -80,9 +110,52 @@
         </a>
 
         {#if $currentUser}
-          <a href="/profile/{$currentUser.id}" class="user-avatar">
-            <img src={$currentUser.profilePic} alt={$currentUser.name} />
-          </a>
+          <div class="user-menu" bind:this={userMenuElement}>
+            <button
+              class="user-avatar"
+              onclick={() => (showUserMenu = !showUserMenu)}
+              aria-haspopup="menu"
+              aria-expanded={showUserMenu}
+              aria-label="Switch user (currently {$currentUser.name})"
+            >
+              <FallbackImage src={$currentUser.profilePic} alt={$currentUser.name} fallbackType="avatar" />
+            </button>
+
+            {#if showUserMenu}
+              <div class="user-menu-popover" role="menu" aria-label="Switch user">
+                <div class="user-menu-header">
+                  <span class="viewing-as">Viewing as</span>
+                  <a
+                    href="/profile/{$currentUser.id}"
+                    class="current-user-link"
+                    onclick={() => (showUserMenu = false)}
+                  >
+                    {$currentUser.name} <span aria-hidden="true">→</span>
+                  </a>
+                </div>
+                <div class="user-menu-list">
+                  {#each $appStore.users as user (user.id)}
+                    <button
+                      class="user-menu-item"
+                      class:active={user.id === $currentUser.id}
+                      role="menuitemradio"
+                      aria-checked={user.id === $currentUser.id}
+                      onclick={() => switchUser(user.id)}
+                    >
+                      <span class="menu-avatar">
+                        <FallbackImage src={user.profilePic} alt="" fallbackType="avatar" />
+                      </span>
+                      <span class="menu-name">{user.name}</span>
+                      {#if user.id === $currentUser.id}
+                        <span class="menu-check" aria-hidden="true">✓</span>
+                      {/if}
+                    </button>
+                  {/each}
+                </div>
+                <p class="user-menu-hint">Demo: switch users to explore the sharing tiers</p>
+              </div>
+            {/if}
+          </div>
         {/if}
       </div>
     </div>
@@ -248,12 +321,20 @@
     text-align: center;
   }
 
+  .user-menu {
+    position: relative;
+  }
+
   .user-avatar {
+    display: block;
     width: 2.25rem;
     height: 2.25rem;
     border-radius: 50%;
     overflow: hidden;
     border: 2px solid var(--primary);
+    padding: 0;
+    background: none;
+    cursor: pointer;
     transition: transform var(--transition);
   }
 
@@ -261,10 +342,102 @@
     transform: scale(1.1);
   }
 
-  .user-avatar img {
+  .user-menu-popover {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    width: 240px;
+    background-color: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    z-index: 200;
+    animation: slideUp 0.15s ease-out;
+    overflow: hidden;
+  }
+
+  .user-menu-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .viewing-as {
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+  }
+
+  .current-user-link {
+    font-weight: 600;
+    font-size: 0.9375rem;
+    color: var(--text-primary);
+    text-decoration: none;
+  }
+
+  .current-user-link:hover {
+    color: var(--primary);
+  }
+
+  .user-menu-list {
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 0.375rem;
+  }
+
+  .user-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
     width: 100%;
-    height: 100%;
-    object-fit: cover;
+    padding: 0.5rem 0.625rem;
+    border: none;
+    background: none;
+    border-radius: var(--radius);
+    cursor: pointer;
+    text-align: left;
+    transition: background-color var(--transition);
+  }
+
+  .user-menu-item:hover {
+    background-color: var(--surface);
+  }
+
+  .user-menu-item.active {
+    background-color: rgba(16, 185, 129, 0.1);
+  }
+
+  .menu-avatar {
+    display: block;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .menu-name {
+    flex: 1;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .menu-check {
+    color: var(--primary);
+    font-weight: 700;
+  }
+
+  .user-menu-hint {
+    margin: 0;
+    padding: 0.625rem 1rem;
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    background-color: var(--surface);
+    border-top: 1px solid var(--border);
   }
 
   .main-content {

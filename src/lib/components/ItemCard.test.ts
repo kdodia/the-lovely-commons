@@ -67,7 +67,7 @@ function createTestItem(overrides: Partial<Item> = {}): Item {
 
 describe('ItemCard', () => {
 	beforeEach(() => {
-		appStore.set(createTestState());
+		appStore.replaceState(createTestState());
 	});
 
 	it('renders item name', () => {
@@ -106,6 +106,14 @@ describe('ItemCard', () => {
 		// Description should be truncated to 80 chars + "..."
 		const expectedText = 'A'.repeat(80) + '...';
 		expect(screen.getByText(expectedText)).toBeInTheDocument();
+	});
+
+	it('does not append an ellipsis to short descriptions', () => {
+		const item = createTestItem({ description: 'Short and sweet' });
+		render(ItemCard, { props: { item } });
+
+		expect(screen.getByText('Short and sweet')).toBeInTheDocument();
+		expect(screen.queryByText('Short and sweet...')).not.toBeInTheDocument();
 	});
 
 	it('shows unavailable badge when item is borrowed', () => {
@@ -180,7 +188,7 @@ describe('ItemCard', () => {
 
 describe('ItemCard permission badges', () => {
 	beforeEach(() => {
-		appStore.set(createTestState());
+		appStore.replaceState(createTestState());
 	});
 
 	it('shows correct icon for close-friends permission', () => {
@@ -215,7 +223,7 @@ describe('ItemCard permission badges', () => {
 
 describe('ItemCard conditions', () => {
 	beforeEach(() => {
-		appStore.set(createTestState());
+		appStore.replaceState(createTestState());
 	});
 
 	const conditions: Array<'excellent' | 'good' | 'fair' | 'poor'> = ['excellent', 'good', 'fair', 'poor'];

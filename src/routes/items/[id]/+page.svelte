@@ -1,18 +1,25 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { appStore, getCategoryPath, getPermissionLevelInfo } from '$lib/store';
-  import { goto } from '$app/navigation';
+  import { appStore, canUserViewItem, createId, getCategoryPath, getPermissionLevelInfo } from '$lib/store';
   import Toast from '$lib/components/Toast.svelte';
   import DateRangeCalendar from '$lib/components/DateRangeCalendar.svelte';
   import type { BorrowRequest } from '$lib/types';
-  import { NUDGE_DELAY_DAYS, TOAST_DURATION_MS } from '$lib/constants';
+  import { NUDGE_DELAY_DAYS } from '$lib/constants';
+  import { addDays, formatDisplayDate, startOfLocalDay, toLocalISODate } from '$lib/dates';
+  import { useToast } from '$lib/useToast.svelte';
 
   let itemId = $derived($page.params.id);
   let item = $derived($appStore.items.find((i) => i.id === itemId));
+  // The same permission check the browse grid uses — deep links must not
+  // reveal items the current user isn't allowed to see.
+  let canView = $derived(item ? canUserViewItem(item, $appStore.currentUserId, $appStore) : false);
   let lender = $derived($appStore.users.find((u) => u.id === item?.lenderId));
   let currentUser = $derived($appStore.users.find((u) => u.id === $appStore.currentUserId));
   let categoryPath = $derived(item ? getCategoryPath(item.categoryId, $appStore) : []);
   let permissionInfo = $derived(item ? getPermissionLevelInfo(item.permissionLevel) : null);
+  // Collections are derived from the tags themselves (tag.itemIds is the
+  // source of truth; item.tagIds is not kept in sync by tag actions).
+  let itemTags = $derived(item ? $appStore.tags.filter((t) => t.itemIds.includes(item.id)) : []);
 
   // Wishlist state
   let wishlistEntry = $derived(
@@ -42,7 +49,7 @@
   let startDate = $state('');
   let endDate = $state('');
   let requestMessage = $state('');
-  let toast = $state<{ message: string; type: 'success' | 'error' } | null>(null);
+  const toaster = useToast();
 
   // Check if current user has already requested this item
   let existingRequest = $derived(
@@ -56,72 +63,66 @@
 
   // Check if current user can request this item
   let canRequest = $derived(
-    item && currentUser && item.lenderId !== $appStore.currentUserId && item.available && !existingRequest
+    item && currentUser && canView && item.lenderId !== $appStore.currentUserId && item.available && !existingRequest
   );
 
-  // Check if nudge button should be shown (NUDGE_DELAY_DAYS after request, not already nudged)
-  let canNudge = $derived.by(() => {
-    if (!existingRequest) return false;
-    if (existingRequest.lastNudgedAt) return false; // Already nudged
+  // The nudge cooldown counts from the last nudge (or the request itself if
+  // never nudged), so a long-ignored request can be nudged again after
+  // NUDGE_DELAY_DAYS rather than exactly once ever.
+  let daysSinceLastNudgeEvent = $derived.by(() => {
+    if (!existingRequest) return null;
+    const reference = existingRequest.lastNudgedAt ?? existingRequest.createdAt;
 
     // Use day boundaries for consistent calculation across timezones
-    const requestDay = new Date(existingRequest.createdAt).setHours(0, 0, 0, 0);
+    const referenceDay = new Date(reference).setHours(0, 0, 0, 0);
     const today = new Date().setHours(0, 0, 0, 0);
-    const daysSinceRequest = Math.floor((today - requestDay) / (1000 * 60 * 60 * 24));
-
-    return daysSinceRequest >= NUDGE_DELAY_DAYS;
+    return Math.floor((today - referenceDay) / (1000 * 60 * 60 * 24));
   });
+
+  let canNudge = $derived(
+    daysSinceLastNudgeEvent !== null && daysSinceLastNudgeEvent >= NUDGE_DELAY_DAYS
+  );
 
   // Calculate days remaining until nudge is available
   let daysUntilNudge = $derived.by(() => {
-    if (!existingRequest || existingRequest.lastNudgedAt || canNudge) return null;
-
-    // Use day boundaries for consistent calculation across timezones
-    const requestDay = new Date(existingRequest.createdAt).setHours(0, 0, 0, 0);
-    const today = new Date().setHours(0, 0, 0, 0);
-    const daysSinceRequest = Math.floor((today - requestDay) / (1000 * 60 * 60 * 24));
-
-    return NUDGE_DELAY_DAYS - daysSinceRequest;
+    if (daysSinceLastNudgeEvent === null || canNudge) return null;
+    return NUDGE_DELAY_DAYS - daysSinceLastNudgeEvent;
   });
 
   // Calculate the date when nudge becomes available
   let nudgeAvailableDate = $derived.by(() => {
-    if (!existingRequest || existingRequest.lastNudgedAt || canNudge) return null;
-
-    const requestDate = new Date(existingRequest.createdAt);
-    const availableDate = new Date(requestDate);
-    availableDate.setDate(availableDate.getDate() + NUDGE_DELAY_DAYS);
-
-    return availableDate;
+    if (!existingRequest || canNudge) return null;
+    const reference = existingRequest.lastNudgedAt ?? existingRequest.createdAt;
+    return addDays(new Date(reference), NUDGE_DELAY_DAYS);
   });
 
   function openRequestForm() {
     showRequestForm = true;
     // Set min date to tomorrow
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    startDate = tomorrow.toISOString().split('T')[0];
+    startDate = toLocalISODate(addDays(new Date(), 1));
   }
 
   function nudgeLender() {
     if (!existingRequest) return;
-    appStore.nudgeRequest(existingRequest.id);
-    toast = { message: 'Reminder sent!', type: 'success' };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    const result = appStore.nudgeRequest(existingRequest.id);
+    if (result.ok) {
+      toaster.showToast('Reminder sent!', 'success');
+    } else {
+      toaster.showToast(result.error, 'error');
+    }
   }
 
   function submitRequest() {
     if (!item || !startDate || !endDate) return;
 
-    // Validate that end date is after start date
-    if (new Date(endDate) <= new Date(startDate)) {
-      toast = { message: 'End date must be after start date', type: 'error' };
-      setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    // Validate that the range is ordered (same-day borrows are allowed)
+    if (endDate < startDate) {
+      toaster.showToast('End date must not be before start date', 'error');
       return;
     }
 
     const request: BorrowRequest = {
-      id: `req-${Date.now()}`,
+      id: createId('req'),
       itemId: item.id,
       borrowerId: $appStore.currentUserId,
       lenderId: item.lenderId,
@@ -132,16 +133,17 @@
       createdAt: new Date().toISOString()
     };
 
-    appStore.createBorrowRequest(request);
-    toast = { message: 'Borrow request sent!', type: 'success' };
+    const result = appStore.createBorrowRequest(request);
+    if (!result.ok) {
+      toaster.showToast(result.error, 'error');
+      return;
+    }
+
+    toaster.showToast('Borrow request sent!', 'success');
     showRequestForm = false;
     startDate = '';
     endDate = '';
     requestMessage = '';
-
-    setTimeout(() => {
-      toast = null;
-    }, 3000);
   }
 
   // Booked date ranges for calendar
@@ -153,12 +155,7 @@
   let blockedDateRanges = $derived(item?.blockedDates || []);
 
   // Min date for calendar (tomorrow)
-  let minCalendarDate = $derived.by(() => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0);
-    return tomorrow;
-  });
+  let minCalendarDate = $derived(startOfLocalDay(addDays(new Date(), 1)));
 
   // Handle date selection from calendar
   function handleDateSelect(start: string, end: string | null) {
@@ -174,22 +171,17 @@
     if (!itemId) return;
     if (isInWishlist) {
       appStore.removeFromWishlist(itemId);
-      toast = { message: 'Removed from wishlist', type: 'success' };
+      toaster.showToast('Removed from wishlist', 'success');
     } else {
       appStore.addToWishlist(itemId, true);
-      toast = { message: 'Added to wishlist! You\'ll be notified when available.', type: 'success' };
+      toaster.showToast("Added to wishlist! You'll be notified when available.", 'success');
     }
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
   }
 
   function toggleNotification() {
     if (!itemId) return;
     appStore.toggleWishlistNotification(itemId);
-    toast = {
-      message: notifyOnAvailable ? 'Notifications disabled' : 'Notifications enabled',
-      type: 'success'
-    };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    toaster.showToast(notifyOnAvailable ? 'Notifications disabled' : 'Notifications enabled', 'success');
   }
 </script>
 
@@ -198,6 +190,14 @@
     <div class="error-state">
       <h2>Item not found</h2>
       <p>The item you're looking for doesn't exist or has been removed.</p>
+      <a href="/" class="btn btn-primary">Back to Browse</a>
+    </div>
+  </div>
+{:else if !canView}
+  <div class="container">
+    <div class="error-state">
+      <h2>This item isn't shared with you</h2>
+      <p>The owner has limited who can see this item. Growing your network might open it up!</p>
       <a href="/" class="btn btn-primary">Back to Browse</a>
     </div>
   </div>
@@ -295,11 +295,11 @@
               <p>{item.description}</p>
             </div>
 
-            {#if item.tagIds.length > 0}
+            {#if itemTags.length > 0}
               <div class="item-tags">
                 <h3>Collections</h3>
                 <div class="tags-list">
-                  {#each $appStore.tags.filter((t) => item.tagIds.includes(t.id)) as tag}
+                  {#each itemTags as tag}
                     <span class="badge badge-primary"><span aria-hidden="true">🏷️</span> {tag.name}</span>
                   {/each}
                 </div>
@@ -350,7 +350,7 @@
                     <p class="request-status-message">"{existingRequest.message}"</p>
                   {/if}
                   <div class="request-status-dates">
-                    <span><span aria-hidden="true">📅</span> {new Date(existingRequest.startDate).toLocaleDateString()} - {new Date(existingRequest.endDate).toLocaleDateString()}</span>
+                    <span><span aria-hidden="true">📅</span> {formatDisplayDate(existingRequest.startDate)} - {formatDisplayDate(existingRequest.endDate)}</span>
                   </div>
                   <p class="request-status-info">Waiting for {lender?.name} to respond to your request</p>
 
@@ -480,12 +480,14 @@
               <h3>Reviews ({history.filter((h) => h.review).length})</h3>
               <div class="reviews-list">
                 {#each history.filter((h) => h.review) as hist}
+                  {@const reviewer = $appStore.users.find((u) => u.id === hist.lenderId)}
                   {@const borrower = $appStore.users.find((u) => u.id === hist.borrowerId)}
                   <div class="review-item">
                     <div class="review-header">
-                      <img src={borrower?.profilePic} alt={borrower?.name} class="reviewer-avatar" />
+                      <img src={reviewer?.profilePic} alt={reviewer?.name} class="reviewer-avatar" />
                       <div>
-                        <div class="reviewer-name">{borrower?.name}</div>
+                        <div class="reviewer-name">{reviewer?.name}</div>
+                        <div class="review-context">after a borrow by {borrower?.name}</div>
                         <div class="review-rating">
                           {#each Array(hist.rating || 0) as _, i}
                             <span aria-hidden="true">⭐</span>
@@ -495,10 +497,7 @@
                     </div>
                     <p class="review-text">{hist.review}</p>
                     <div class="review-date">
-                      {new Date(hist.endDate).toLocaleDateString('en-US', {
-                        month: 'short',
-                        year: 'numeric'
-                      })}
+                      {formatDisplayDate(hist.endDate, { month: 'short', year: 'numeric' })}
                     </div>
                   </div>
                 {/each}
@@ -511,8 +510,8 @@
   </div>
 {/if}
 
-{#if toast}
-  <Toast message={toast.message} type={toast.type} onClose={() => (toast = null)} />
+{#if toaster.toast}
+  <Toast message={toaster.toast.message} type={toaster.toast.type} onClose={toaster.clearToast} />
 {/if}
 
 <style>
@@ -1114,6 +1113,11 @@
   .reviewer-name {
     font-weight: 600;
     font-size: 0.875rem;
+  }
+
+  .review-context {
+    font-size: 0.75rem;
+    color: var(--text-muted);
   }
 
   .review-rating {

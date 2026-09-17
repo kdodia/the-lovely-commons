@@ -1,12 +1,13 @@
 <script lang="ts">
-  import { appStore, incomingRequests, outgoingRequests, activeLoans } from '$lib/store';
+  import { appStore, incomingRequests, outgoingRequests, approvedLoans, activeLoans } from '$lib/store';
   import Toast from '$lib/components/Toast.svelte';
   import { MAX_RATING, MIN_RATING, DEFAULT_RATING } from '$lib/constants';
+  import { formatDisplayDate, todayLocalISO } from '$lib/dates';
   import { useToast } from '$lib/useToast.svelte';
   import type { ItemCondition } from '$lib/types';
 
   let activeTab = $state<'incoming' | 'outgoing' | 'active'>('incoming');
-  const { toast, showToast, clearToast } = useToast();
+  const toaster = useToast();
 
   // Return modal state
   let showReturnModal = $state(false);
@@ -34,13 +35,30 @@
   };
 
   function approveRequest(requestId: string) {
-    appStore.updateBorrowRequest(requestId, { status: 'approved' });
-    showToast('Request approved!', 'success');
+    const result = appStore.approveRequest(requestId);
+    if (result.ok) {
+      toaster.showToast('Request approved! The item is now reserved.', 'success');
+    } else {
+      toaster.showToast(result.error, 'error');
+    }
   }
 
   function denyRequest(requestId: string) {
-    appStore.updateBorrowRequest(requestId, { status: 'denied' });
-    showToast('Request declined', 'error');
+    const result = appStore.denyRequest(requestId);
+    if (result.ok) {
+      toaster.showToast('Request declined', 'info');
+    } else {
+      toaster.showToast(result.error, 'error');
+    }
+  }
+
+  function markPickedUp(requestId: string) {
+    const result = appStore.markPickedUp(requestId);
+    if (result.ok) {
+      toaster.showToast('Loan started — marked as picked up', 'success');
+    } else {
+      toaster.showToast(result.error, 'error');
+    }
   }
 
   function markAsReturned(requestId: string) {
@@ -64,18 +82,22 @@
 
     // Validate rating is within valid range
     if (returnRating < MIN_RATING || returnRating > MAX_RATING) {
-      showToast(`Rating must be between ${MIN_RATING} and ${MAX_RATING}`, 'error');
+      toaster.showToast(`Rating must be between ${MIN_RATING} and ${MAX_RATING}`, 'error');
       return;
     }
 
     // Pass condition only if it was changed
     const conditionToUpdate = conditionChanged ? newCondition : undefined;
-    appStore.completeBorrow(selectedLoanId, returnRating, returnReview, conditionToUpdate);
+    const result = appStore.completeBorrow(selectedLoanId, returnRating, returnReview, conditionToUpdate);
+    if (!result.ok) {
+      toaster.showToast(result.error, 'error');
+      return;
+    }
 
     const message = conditionChanged
       ? `Item marked as returned! Condition updated to ${conditionLabels[newCondition].label}.`
       : 'Item marked as returned!';
-    showToast(message, 'success');
+    toaster.showToast(message, 'success');
 
     // Reset modal state
     showReturnModal = false;
@@ -158,8 +180,8 @@
       >
         <span aria-hidden="true">🔄</span>
         <span>Active Loans</span>
-        {#if $activeLoans.length > 0}
-          <span class="tab-badge" aria-label="{$activeLoans.length} active loans">{$activeLoans.length}</span>
+        {#if $approvedLoans.length + $activeLoans.length > 0}
+          <span class="tab-badge" aria-label="{$approvedLoans.length + $activeLoans.length} loans">{$approvedLoans.length + $activeLoans.length}</span>
         {/if}
       </button>
     </div>
@@ -200,9 +222,7 @@
                     <div class="request-dates">
                       <span aria-hidden="true">📅</span>
                       <span
-                        >{new Date(request.startDate).toLocaleDateString()} - {new Date(
-                          request.endDate
-                        ).toLocaleDateString()}</span
+                        >{formatDisplayDate(request.startDate)} - {formatDisplayDate(request.endDate)}</span
                       >
                     </div>
                     {#if request.message}
@@ -253,16 +273,20 @@
                     <div class="request-dates">
                       <span aria-hidden="true">📅</span>
                       <span
-                        >{new Date(request.startDate).toLocaleDateString()} - {new Date(
-                          request.endDate
-                        ).toLocaleDateString()}</span
+                        >{formatDisplayDate(request.startDate)} - {formatDisplayDate(request.endDate)}</span
                       >
                     </div>
                     <div class="status-badge-inline">
                       {#if request.status === 'pending'}
                         <span class="badge badge-warning">⏳ Pending</span>
                       {:else if request.status === 'approved'}
-                        <span class="badge badge-success">✓ Approved</span>
+                        <span class="badge badge-success">✓ Approved — awaiting pickup</span>
+                      {:else if request.status === 'active'}
+                        <span class="badge badge-success">🔄 Borrowing now</span>
+                      {:else if request.status === 'completed'}
+                        <span class="badge badge-primary">✓ Returned</span>
+                      {:else if request.status === 'cancelled'}
+                        <span class="badge badge-error">Cancelled</span>
                       {:else if request.status === 'denied'}
                         <span class="badge badge-error">✗ Declined</span>
                       {/if}
@@ -275,13 +299,52 @@
         </div>
       {:else if activeTab === 'active'}
         <div class="requests-list">
-          {#if $activeLoans.length === 0}
+          {#if $approvedLoans.length === 0 && $activeLoans.length === 0}
             <div class="empty-state">
               <span class="empty-icon" aria-hidden="true">📋</span>
               <h3>No active loans</h3>
               <p>Items currently borrowed from you will appear here</p>
             </div>
           {:else}
+            {#each $approvedLoans as loan}
+              {@const item = $appStore.items.find((i) => i.id === loan.itemId)}
+              {@const borrower = $appStore.users.find((u) => u.id === loan.borrowerId)}
+              <div class="request-card card">
+                <div class="request-content">
+                  <a href="/items/{loan.itemId}" class="request-item-link">
+                    <img src={item?.imageUrl} alt={item?.name} class="request-item-image" />
+                  </a>
+                  <div class="request-details">
+                    <a href="/items/{loan.itemId}" class="request-title-link">
+                      <h3 class="request-title">{item?.name}</h3>
+                    </a>
+                    <div class="request-meta">
+                      <span>Reserved for</span>
+                      <a href="/profile/{borrower?.id}" class="user-link">
+                        <img
+                          src={borrower?.profilePic}
+                          alt={borrower?.name}
+                          class="borrower-avatar"
+                        />
+                        <span class="borrower-name">{borrower?.name}</span>
+                      </a>
+                    </div>
+                    <div class="request-dates">
+                      <span aria-hidden="true">📅</span>
+                      <span>{formatDisplayDate(loan.startDate)} - {formatDisplayDate(loan.endDate)}</span>
+                    </div>
+                    <div class="status-badge-inline">
+                      <span class="badge badge-warning">⏳ Awaiting pickup</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="request-actions">
+                  <button class="btn btn-primary" onclick={() => markPickedUp(loan.id)}>
+                    Mark as Picked Up
+                  </button>
+                </div>
+              </div>
+            {/each}
             {#each $activeLoans as loan}
               {@const item = $appStore.items.find((i) => i.id === loan.itemId)}
               {@const borrower = $appStore.users.find((u) => u.id === loan.borrowerId)}
@@ -307,8 +370,8 @@
                     </div>
                     <div class="request-dates">
                       <span aria-hidden="true">📅</span>
-                      <span class:overdue={new Date(loan.endDate) < new Date()}
-                        >Return by: {new Date(loan.endDate).toLocaleDateString()}</span
+                      <span class:overdue={loan.endDate < todayLocalISO()}
+                        >Return by: {formatDisplayDate(loan.endDate)}</span
                       >
                     </div>
                   </div>
@@ -434,8 +497,8 @@
   </div>
 {/if}
 
-{#if toast}
-  <Toast message={toast.message} type={toast.type} onClose={clearToast} />
+{#if toaster.toast}
+  <Toast message={toaster.toast.message} type={toaster.toast.type} onClose={toaster.clearToast} />
 {/if}
 
 <style>

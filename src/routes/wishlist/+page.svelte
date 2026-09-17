@@ -2,23 +2,18 @@
   import { appStore, currentUserWishlistItems } from '$lib/store';
   import ItemCard from '$lib/components/ItemCard.svelte';
   import Toast from '$lib/components/Toast.svelte';
-  import { TOAST_DURATION_MS } from '$lib/constants';
+  import { useToast } from '$lib/useToast.svelte';
 
-  let toast = $state<{ message: string; type: 'success' | 'error' } | null>(null);
+  const toaster = useToast();
 
   function removeFromWishlist(itemId: string) {
     appStore.removeFromWishlist(itemId);
-    toast = { message: 'Removed from wishlist', type: 'success' };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    toaster.showToast('Removed from wishlist', 'success');
   }
 
   function toggleNotification(itemId: string, currentState: boolean) {
     appStore.toggleWishlistNotification(itemId);
-    toast = {
-      message: currentState ? 'Notifications disabled' : 'Notifications enabled',
-      type: 'success'
-    };
-    setTimeout(() => (toast = null), TOAST_DURATION_MS);
+    toaster.showToast(currentState ? 'Notifications disabled' : 'Notifications enabled', 'success');
   }
 </script>
 
@@ -61,13 +56,10 @@
                     class="toggle-checkbox"
                   />
                   <span class="toggle-switch"></span>
-                  <span class="toggle-text">
-                    {#if entry.item.available}
-                      Available now
-                    {:else}
-                      Notify when available
-                    {/if}
-                  </span>
+                  <span class="toggle-text">Notify when available</span>
+                  {#if entry.item.available}
+                    <span class="badge badge-success">Available now</span>
+                  {/if}
                 </label>
               </div>
               <button
@@ -92,8 +84,8 @@
   </div>
 </div>
 
-{#if toast}
-  <Toast message={toast.message} type={toast.type} onClose={() => (toast = null)} />
+{#if toaster.toast}
+  <Toast message={toaster.toast.message} type={toaster.toast.type} onClose={toaster.clearToast} />
 {/if}
 
 <style>

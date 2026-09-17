@@ -20,12 +20,12 @@
     isLoading = false;
   }
 
-  // Reset error state when src changes
+  // Reset state whenever src changes. Without a src there is nothing to
+  // load, so isLoading must be false or the shimmer overlays the "no image"
+  // placeholder forever.
   $effect(() => {
-    if (src) {
-      hasError = false;
-      isLoading = true;
-    }
+    hasError = false;
+    isLoading = !!src;
   });
 </script>
 
@@ -34,6 +34,8 @@
     <img
       {src}
       {alt}
+      loading="lazy"
+      decoding="async"
       onerror={handleError}
       onload={handleLoad}
       class="fallback-image"

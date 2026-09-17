@@ -1,8 +1,9 @@
 <script lang="ts">
-  import type { Item, User } from '$lib/types';
+  import type { Item } from '$lib/types';
   import { appStore, getPermissionLevelInfo } from '$lib/store';
-  import { derived } from 'svelte/store';
+  import { goto } from '$app/navigation';
   import FallbackImage from './FallbackImage.svelte';
+  import { DESCRIPTION_PREVIEW_LENGTH } from '$lib/constants';
 
   interface Props {
     item: Item;
@@ -10,14 +11,24 @@
 
   let { item }: Props = $props();
 
-  const lender = derived(appStore, ($state) =>
-    $state.users.find((u) => u.id === item.lenderId)
-  );
+  let lender = $derived($appStore.users.find((u) => u.id === item.lenderId));
 
   const permissionInfo = $derived(getPermissionLevelInfo(item.permissionLevel));
+
+  let descriptionPreview = $derived(
+    item.description.length > DESCRIPTION_PREVIEW_LENGTH
+      ? `${item.description.slice(0, DESCRIPTION_PREVIEW_LENGTH)}...`
+      : item.description
+  );
 </script>
 
-<a href="/items/{item.id}" class="item-card card">
+<!--
+  The card uses a stretched link overlay instead of wrapping everything in an
+  <a>, because the lender button inside would otherwise be nested interactive
+  content (invalid HTML and broken for keyboard/screen-reader users).
+-->
+<div class="item-card card">
+  <a href="/items/{item.id}" class="card-link" aria-label={item.name}></a>
   <div class="item-image">
     <FallbackImage src={item.imageUrl} alt={item.name} fallbackType="item" />
     <div class="permission-badge" style="background-color: {permissionInfo.color};">
@@ -41,26 +52,22 @@
       </div>
     </div>
 
-    <p class="item-description">{item.description.slice(0, 80)}...</p>
+    <p class="item-description">{descriptionPreview}</p>
 
     <div class="item-footer">
       <button
         class="lender-info"
-        onclick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          window.location.href = `/profile/${$lender?.id}`;
-        }}
+        onclick={() => goto(`/profile/${lender?.id}`)}
       >
         <span class="lender-avatar">
-          <FallbackImage src={$lender?.profilePic} alt={$lender?.name || 'User'} fallbackType="avatar" />
+          <FallbackImage src={lender?.profilePic} alt={lender?.name || 'User'} fallbackType="avatar" />
         </span>
-        <span class="lender-name">{$lender?.name}</span>
+        <span class="lender-name">{lender?.name}</span>
       </button>
       <span class="borrows-count">{item.totalBorrows} borrows</span>
     </div>
   </div>
-</a>
+</div>
 
 <style>
   .item-card {
@@ -69,6 +76,19 @@
     cursor: pointer;
     text-decoration: none;
     color: inherit;
+    position: relative;
+  }
+
+  .card-link {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+  }
+
+  .lender-info {
+    position: relative;
+    z-index: 2;
   }
 
   .item-image {
