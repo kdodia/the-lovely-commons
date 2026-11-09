@@ -92,7 +92,7 @@
             class:active={$page.url.pathname === item.href}
           >
             <span aria-hidden="true">{item.icon}</span>
-            <span>{item.label}</span>
+            <span class="nav-label">{item.label}</span>
           </a>
         {/each}
       </div>
@@ -512,17 +512,64 @@
       gap: 0.5rem;
     }
 
-    .nav-links {
+    .nav-actions {
       gap: 0.25rem;
     }
 
-    .nav-link span:last-child {
-      display: none;
+    .reset-btn,
+    .notification-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 2.5rem;
+      min-height: 2.5rem;
+      padding: 0;
+    }
+
+    .user-avatar {
+      width: 2.5rem;
+      height: 2.5rem;
+    }
+
+    /* Primary links become a bottom tab bar so the top bar only holds logo + actions */
+    .nav-links {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 100;
+      gap: 0;
+      justify-content: space-around;
+      background-color: var(--background);
+      border-top: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+      padding-bottom: env(safe-area-inset-bottom);
     }
 
     .nav-link {
-      padding: 0.5rem;
-      font-size: 1.125rem;
+      flex: 1;
+      min-width: 0;
+      min-height: 3.25rem;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0.125rem;
+      padding: 0.25rem 0;
+      font-size: 1.25rem;
+      border-radius: 0;
+    }
+
+    .nav-label {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.625rem;
+      line-height: 1.2;
+    }
+
+    .main-content {
+      padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
     }
 
     .modal-content {
