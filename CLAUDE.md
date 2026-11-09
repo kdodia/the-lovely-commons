@@ -44,7 +44,7 @@ The app uses a centralized Svelte store (`src/lib/store.ts`) with localStorage p
 - **Single source of truth**: `appStore` contains all application state (`AppState` type)
 - **Derived stores**: Computed values like `currentUser`, `currentUserItems`, `visibleItems`, `incomingRequests`, `approvedLoans`, `activeLoans`, etc.
 - **Action methods**: All state mutations go through store methods (e.g., `createBorrowRequest`, `updateItem`, `addToWishlist`). The raw writable `set`/`update` are intentionally not exported; tests use `appStore.replaceState()` to inject fixtures.
-- **ActionResult**: Methods that can be rejected (`createBorrowRequest`, `approveRequest`, `denyRequest`, `cancelRequest`, `confirmPickup`, `confirmReturn`, `submitItemReview`, `nudgeRequest`, `deleteItem`, `deleteTag`) return `{ ok: true } | { ok: false; error }` so the UI can show the reason. The acting user is always `state.currentUserId`; methods check that the actor is allowed (owner, borrower, lender, tag creator).
+- **ActionResult**: Methods that can be rejected (`createBorrowRequest`, `approveRequest`, `denyRequest`, `cancelRequest`, `confirmPickup`, `confirmReturn`, `submitItemReview`, `nudgeRequest`, `sendReturnReminder`, `deleteItem`, `deleteTag`) return `{ ok: true } | { ok: false; error }` so the UI can show the reason. The acting user is always `state.currentUserId`; methods check that the actor is allowed (owner, borrower, lender, tag creator).
 - **Schema migration**: `migrateState()` in `store.ts` runs on every load and upgrades older persisted state (defaults the handoff arrays, moves legacy lender-written `rating`/`review` into `borrowerRating`/`borrowerReview`). Add a step there whenever a stored shape changes.
 - **Automatic persistence**: State automatically syncs to localStorage on every change
 - **Cross-tab sync**: Uses storage events to sync state across browser tabs
@@ -68,6 +68,8 @@ The `canUserViewItem()` helper function in `store.ts` implements this logic. The
 - **Items** belong to lenders, have categories, tags, and permission levels
 - **BorrowRequests** track the borrowing lifecycle: pending → approved (lender approves; item becomes unavailable) → active (both parties `confirmPickup`) → completed (both parties `confirmReturn`; moves to history). The borrower can `cancelRequest` while pending or approved; the lender can while approved. `pickupConfirmedBy` / `returnConfirmedBy` record who has confirmed each handoff; read them with `?? []`.
 - **BorrowHistory** stores completed borrows. Two separate ratings live on each entry: `borrowerRating`/`borrowerReview` are the lender's rating of the borrower (captured in the lender's return modal, folded into `User.rating`), and `rating`/`review`/`reviewerId` are the borrower's review of the item (written later via `submitItemReview`, averaged into `Item.rating`). Only entries with `reviewerId` are displayed as item reviews.
+- **Overdue loans**: an `active` request whose `endDate` is before today (`isOverdue`, `daysOverdue`; `overdueLentLoans` / `overdueBorrowedLoans` derived stores). The lender can `sendReturnReminder` once per `RETURN_REMINDER_COOLDOWN_DAYS` calendar days (`lastRemindedAt`).
+- **Borrower feedback visibility**: lender notes about a borrower (`getBorrowerFeedback`) are shown on their profile only when `canViewBorrowerFeedback` allows: the owner, their friends, and lenders with a pending/approved/active request from them.
 - **Tags** are user-created collections that reference item IDs (many-to-many); `deleteItem` scrubs the item from every tag and wishlist and declines its pending requests
 - **Wishlist** allows users to subscribe to unavailable items with notifications
 - **Categories** are hierarchical with optional parent IDs
@@ -97,7 +99,7 @@ SvelteKit file-based routing:
 
 - `/` - Browse page (home) with search, filters, and item grid
 - `/items/[id]` - Item detail page with calendar, reviews, and borrow request form
-- `/dashboard` - Incoming requests, my requests, Lending (items I've lent out) and Borrowing (items I'm holding) tabs with two-sided pickup/return confirmation
+- `/dashboard` - Incoming requests, my requests, Lending (items I've lent out) and Borrowing (items I'm holding) tabs with two-sided pickup/return confirmation, an overdue banner, and `?tab=` deep links
 - `/my-items` - User's item library
 - `/wishlist` - User's wishlist with availability notifications
 - `/network` - Friend management (tiers, promote/demote close friends, send/accept/decline friend requests)
@@ -105,7 +107,7 @@ SvelteKit file-based routing:
 - `/profile/[id]` - User profile pages
 - `/notifications` - Notifications center
 
-Layout: `src/routes/+layout.svelte` contains the navigation bar and wraps all pages.
+Layout: `src/routes/+layout.svelte` contains the navigation bar and wraps all pages. At 640px and below the primary links become a fixed bottom tab bar.
 
 ### Toast Notifications
 
@@ -113,7 +115,7 @@ The `src/lib/useToast.svelte.ts` module exports a `useToast()` factory. Keep the
 
 ### Date Handling
 
-Dates in app state are `'YYYY-MM-DD'` strings meaning a local calendar day. Always use the helpers in `src/lib/dates.ts` (`toLocalISODate`, `parseLocalDate`, `todayLocalISO`, `formatDisplayDate`, `rangesOverlap`) — never `Date.prototype.toISOString()` or `new Date('YYYY-MM-DD')`, both of which shift the day for users outside UTC.
+Dates in app state are `'YYYY-MM-DD'` strings meaning a local calendar day. Always use the helpers in `src/lib/dates.ts` (`toLocalISODate`, `parseLocalDate`, `todayLocalISO`, `formatDisplayDate`, `rangesOverlap`, `addDays`, `daysBetween`) — never `Date.prototype.toISOString()` or `new Date('YYYY-MM-DD')`, both of which shift the day for users outside UTC.
 
 ## Data Persistence
 
