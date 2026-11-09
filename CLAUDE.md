@@ -44,7 +44,7 @@ The app uses a centralized Svelte store (`src/lib/store.ts`) with localStorage p
 - **Single source of truth**: `appStore` contains all application state (`AppState` type)
 - **Derived stores**: Computed values like `currentUser`, `currentUserItems`, `visibleItems`, `incomingRequests`, `approvedLoans`, `activeLoans`, etc.
 - **Action methods**: All state mutations go through store methods (e.g., `createBorrowRequest`, `updateItem`, `addToWishlist`). The raw writable `set`/`update` are intentionally not exported; tests use `appStore.replaceState()` to inject fixtures.
-- **ActionResult**: Methods that can be rejected (`createBorrowRequest`, `approveRequest`, `denyRequest`, `cancelRequest`, `confirmPickup`, `confirmReturn`, `submitItemReview`, `nudgeRequest`, `sendReturnReminder`, `deleteItem`, `deleteTag`) return `{ ok: true } | { ok: false; error }` so the UI can show the reason. The acting user is always `state.currentUserId`; methods check that the actor is allowed (owner, borrower, lender, tag creator).
+- **ActionResult**: Methods that can be rejected (`createBorrowRequest`, `approveRequest`, `denyRequest`, `cancelRequest`, `confirmPickup`, `confirmReturn`, `submitItemReview`, `nudgeRequest`, `sendReturnReminder`, `sendRequestMessage`, `deleteItem`, `deleteTag`) return `{ ok: true } | { ok: false; error }` so the UI can show the reason. The acting user is always `state.currentUserId`; methods check that the actor is allowed (owner, borrower, lender, tag creator).
 - **Schema migration**: `migrateState()` in `store.ts` runs on every load and upgrades older persisted state (defaults the handoff arrays, moves legacy lender-written `rating`/`review` into `borrowerRating`/`borrowerReview`). Add a step there whenever a stored shape changes.
 - **Automatic persistence**: State automatically syncs to localStorage on every change
 - **Cross-tab sync**: Uses storage events to sync state across browser tabs
@@ -68,7 +68,8 @@ The `canUserViewItem()` helper function in `store.ts` implements this logic. The
 - **Items** belong to lenders, have categories, tags, and permission levels
 - **BorrowRequests** track the borrowing lifecycle: pending → approved (lender approves; item becomes unavailable) → active (both parties `confirmPickup`) → completed (both parties `confirmReturn`; moves to history). The borrower can `cancelRequest` while pending or approved; the lender can while approved. `pickupConfirmedBy` / `returnConfirmedBy` record who has confirmed each handoff; read them with `?? []`.
 - **BorrowHistory** stores completed borrows. Two separate ratings live on each entry: `borrowerRating`/`borrowerReview` are the lender's rating of the borrower (captured in the lender's return modal, folded into `User.rating`), and `rating`/`review`/`reviewerId` are the borrower's review of the item (written later via `submitItemReview`, averaged into `Item.rating`). Only entries with `reviewerId` are displayed as item reviews.
-- **Overdue loans**: an `active` request whose `endDate` is before today (`isOverdue`, `daysOverdue`; `overdueLentLoans` / `overdueBorrowedLoans` derived stores). The lender can `sendReturnReminder` once per `RETURN_REMINDER_COOLDOWN_DAYS` calendar days (`lastRemindedAt`).
+- **Overdue loans**: an `active` request whose `endDate` is before today (`isOverdue`, `daysOverdue`; `overdueLentLoans` / `overdueBorrowedLoans` derived stores). The lender can `sendReturnReminder` once per `RETURN_REMINDER_COOLDOWN_DAYS` calendar days (`lastRemindedAt`). `notifyOverdueLoans()` is an idempotent sweep the layout runs on mount and on `visibilitychange`; it notifies both people once per loan (`overdueNotifiedAt`). `sortOverdueFirst` orders the dashboard lists.
+- **Request messages**: `BorrowRequest.messages` (read with `?? []`) holds the two-person thread; the original `message` is shown as its opening entry and is not copied in. `sendRequestMessage` is allowed for the borrower or lender while the request is pending, approved or active (`canSendRequestMessage`).
 - **Borrower feedback visibility**: lender notes about a borrower (`getBorrowerFeedback`) are shown on their profile only when `canViewBorrowerFeedback` allows: the owner, their friends, and lenders with a pending/approved/active request from them.
 - **Tags** are user-created collections that reference item IDs (many-to-many); `deleteItem` scrubs the item from every tag and wishlist and declines its pending requests
 - **Wishlist** allows users to subscribe to unavailable items with notifications
@@ -156,6 +157,7 @@ This mock data is loaded into the store on first run if localStorage is empty.
 - **FallbackImage.svelte**: Image component with error handling and fallback states
 - **Toast.svelte**: Toast notification component
 - **LoanCard.svelte**: A loan from either perspective (`lender` | `borrower`) with the handoff state ("waiting for X" vs "confirm on your side") and confirm/cancel actions
+- **RequestThread.svelte**: Collapsible message thread for a borrow request with a compose box; read-only once the request is closed. Used on every dashboard request and loan card
 - **FriendPicker.svelte**: Checkbox list of the current user's friends, used by the add/edit forms to fill `allowedUserIds` for `specific-users` items
 
 ## Working with the Codebase

@@ -16,7 +16,8 @@ Three passes have landed:
 2. **Feature pass** (`claude/happy-cannon-511acm`): the three features that
    were planned here are done — see "Shipped" below.
 3. **Follow-up pass** (`claude/trusting-hypatia-0hwv0k`): overdue reminders,
-   a phone-width navbar, and lender feedback on borrower profiles. 186 tests.
+   a phone-width navbar, lender feedback on borrower profiles, automatic
+   overdue notices, and a message thread on each request. 222 tests.
 
 ## Conventions (do not regress these)
 
@@ -101,17 +102,33 @@ Three passes have landed:
   profile owner, their friends, and lenders with a pending/approved/active
   request from them. Everyone else sees no section.
 
+- **Overdue polish.** `sortOverdueFirst` puts overdue loans at the top of
+  the Lending and Borrowing tabs. `appStore.notifyOverdueLoans()` is a sweep
+  (run from the layout on mount and on `visibilitychange`) that tells both
+  people once per loan, tracked by `overdueNotifiedAt`: `return-reminder`
+  to the borrower, `loan-overdue` to the lender. It looks at every request
+  (state is shared by all mock users) and writes nothing when idle.
+- **Request messages.** `BorrowRequest.messages` (`RequestMessage[]`, read
+  with `?? []`) and `sendRequestMessage(requestId, text)`: borrower or lender
+  only, while pending/approved/active, trimmed, at most
+  `REQUEST_MESSAGE_MAX_LENGTH`. Notifies the other party with
+  `request-message`, which deep-links to the tab where they see the request.
+  `RequestThread.svelte` renders the thread (the original `message` is its
+  opening entry) on every dashboard request and loan card, collapsed behind
+  "Messages (n)".
+
 ## Next ideas (not started)
 
-1. **Request-level chat.** Requests carry a single `message`. A small thread
-   (`messages: { fromUserId, text, at }[]` on `BorrowRequest`) would let the
-   two parties agree on pickup details without leaving the app.
-2. **Route tests.** Store coverage is thorough; the routes are only smoke
-   tested manually (the dashboard overdue banner and `?tab=` deep link
-   included). `@testing-library/svelte` + the writable `page` mock in
-   `src/test/mocks/stores.ts` make item-page and dashboard tests feasible.
-3. **Overdue polish.** Overdue loans are not sorted first in the Lending
-   tab, and the borrower gets no automatic notice on the day a loan becomes
-   overdue (only when the lender sends a reminder).
-4. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
+1. **Route tests.** Store and component coverage is thorough; the routes are
+   only checked by hand in a browser (overdue banner, `?tab=` deep links,
+   thread toggles, profile feedback visibility). `@testing-library/svelte` +
+   the writable `page` mock in `src/test/mocks/stores.ts` make item-page,
+   dashboard and profile tests feasible.
+2. **Unread messages.** A thread only signals new messages through the
+   notification; the "Messages (n)" toggle has no unread marker.
+3. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
    bottom toasts) must clear the phone tab bar.
+4. **A real backend.** Everything is one browser's localStorage, so other
+   users are simulated. Accounts and a server are the step from prototype to
+   something neighbours can use; messages and notifications are the parts
+   that would change most.
