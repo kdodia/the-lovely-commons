@@ -1398,6 +1398,37 @@ export function canUserViewItem(item: Item, currentUserId: string, state: AppSta
   }
 }
 
+// Lender notes about a borrower are not public: they help someone decide
+// whether to lend, so only the borrower, their friends, and lenders with a
+// live request from them (pending/approved/active) may read them.
+export function canViewBorrowerFeedback(
+  profileUserId: string,
+  viewerId: string,
+  state: AppState
+): boolean {
+  if (profileUserId === viewerId) return true;
+
+  const profileUser = state.users.find((u) => u.id === profileUserId);
+  if (profileUser && isFriendOfLender(profileUser, viewerId)) return true;
+
+  return state.borrowRequests.some(
+    (r) =>
+      r.borrowerId === profileUserId &&
+      r.lenderId === viewerId &&
+      (r.status === 'pending' || r.status === 'approved' || r.status === 'active')
+  );
+}
+
+// Completed borrows where lenders left a rating and/or note about this user as
+// a borrower, newest return first. Does not check who may view them.
+export function getBorrowerFeedback(userId: string, state: AppState): BorrowHistory[] {
+  return state.borrowHistory
+    .filter(
+      (h) => h.borrowerId === userId && (h.borrowerRating != null || !!h.borrowerReview?.trim())
+    )
+    .sort((a, b) => b.endDate.localeCompare(a.endDate));
+}
+
 // Helper to get category path (for breadcrumbs)
 export function getCategoryPath(categoryId: string, state: AppState): string[] {
   const path: string[] = [];

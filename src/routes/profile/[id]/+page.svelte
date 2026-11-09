@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { appStore, canUserViewItem } from '$lib/store';
+  import { appStore, canUserViewItem, canViewBorrowerFeedback, getBorrowerFeedback } from '$lib/store';
+  import FallbackImage from '$lib/components/FallbackImage.svelte';
   import ItemCard from '$lib/components/ItemCard.svelte';
   import { formatDisplayDate } from '$lib/dates';
 
@@ -51,6 +52,13 @@
       return dateB - dateA;
     })
   );
+
+  // Lender notes about this user as a borrower — private to the user, their
+  // friends and lenders with a live request from them.
+  let canSeeFeedback = $derived(
+    userId ? canViewBorrowerFeedback(userId, $appStore.currentUserId, $appStore) : false
+  );
+  let lenderFeedback = $derived(userId ? getBorrowerFeedback(userId, $appStore) : []);
 
   let activityTab = $state<'lending' | 'borrowing'>('borrowing');
 
@@ -128,6 +136,59 @@
             </div>
           {/if}
         </section>
+
+        {#if canSeeFeedback && (lenderFeedback.length > 0 || isCurrentUser)}
+          <section class="feedback-section">
+            <h2 class="section-title">What lenders say</h2>
+            {#if lenderFeedback.length === 0}
+              <div class="empty-state">
+                <p>No lender feedback yet</p>
+              </div>
+            {:else}
+              <div class="feedback-list">
+                {#each lenderFeedback as entry (entry.id)}
+                  {@const lender = $appStore.users.find((u) => u.id === entry.lenderId)}
+                  {@const item = $appStore.items.find((i) => i.id === entry.itemId)}
+                  <div class="feedback-item">
+                    <div class="feedback-lender">
+                      {#if lender}
+                        <a href="/profile/{lender.id}" class="feedback-avatar">
+                          <FallbackImage src={lender.profilePic} alt="" fallbackType="avatar" />
+                        </a>
+                        <a href="/profile/{lender.id}" class="history-link"><strong>{lender.name}</strong></a>
+                      {:else}
+                        <span class="feedback-avatar" aria-hidden="true"></span>
+                        <strong class="removed-item">a removed user</strong>
+                      {/if}
+                    </div>
+                    {#if entry.borrowerRating}
+                      <div class="history-rating" role="img" aria-label="{entry.borrowerRating} out of 5 stars">
+                        {#each Array(Math.max(0, Math.min(5, Math.floor(Number(entry.borrowerRating) || 0)))) as _}
+                          <span aria-hidden="true">⭐</span>
+                        {/each}
+                      </div>
+                    {/if}
+                    {#if entry.borrowerReview?.trim()}
+                      <p class="feedback-note">{entry.borrowerReview}</p>
+                    {/if}
+                    <div class="history-date">
+                      {#if item}
+                        <a href="/items/{item.id}" class="history-link">{item.name}</a>
+                      {:else}
+                        <span class="removed-item">a removed item</span>
+                      {/if}
+                      &middot; {formatDisplayDate(entry.endDate, {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </section>
+        {/if}
 
         {#if lendingActivity.length > 0 || borrowingActivity.length > 0}
           <section class="history-section">
@@ -474,6 +535,45 @@
     .items-grid {
       grid-template-columns: 1fr;
     }
+  }
+
+  .feedback-section {
+    margin-top: 3rem;
+  }
+
+  .feedback-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .feedback-item {
+    padding: 1rem;
+    background-color: var(--surface);
+    border-radius: var(--radius);
+  }
+
+  .feedback-lender {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+    font-size: 0.875rem;
+  }
+
+  .feedback-avatar {
+    display: block;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .feedback-note {
+    margin: 0.5rem 0;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
   }
 
   .removed-item {

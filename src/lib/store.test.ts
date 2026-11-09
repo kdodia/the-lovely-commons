@@ -18,7 +18,9 @@ import {
 	daysOverdue,
 	nextReturnReminderDate,
 	overdueLentLoans,
-	overdueBorrowedLoans
+	overdueBorrowedLoans,
+	canViewBorrowerFeedback,
+	getBorrowerFeedback
 } from './store';
 import type { AppState, Item, User, BorrowRequest, BorrowHistory, Tag } from './types';
 
@@ -1680,5 +1682,85 @@ describe('loadState resilience', () => {
 		const state = get(mod.appStore);
 		expect(state.users.length).toBeGreaterThan(0);
 		expect(state.currentUserId).toBe('user1');
+	});
+});
+
+describe('borrower feedback', () => {
+	const req = (status: BorrowRequest['status'], over: Partial<BorrowRequest> = {}): BorrowRequest => ({
+		id: `r-${status}`,
+		itemId: 'i1',
+		borrowerId: 'user3',
+		lenderId: 'user1',
+		startDate: '2025-01-01',
+		endDate: '2025-01-03',
+		status,
+		createdAt: '2025-01-01',
+		...over
+	});
+
+	describe('canViewBorrowerFeedback', () => {
+		it('allows the profile owner', () => {
+			expect(canViewBorrowerFeedback('user3', 'user3', createTestState())).toBe(true);
+		});
+
+		it('allows a friend of the profile owner', () => {
+			expect(canViewBorrowerFeedback('user3', 'user2', createTestState())).toBe(true);
+		});
+
+		it('hides it from strangers', () => {
+			expect(canViewBorrowerFeedback('user3', 'user1', createTestState())).toBe(false);
+		});
+
+		it.each(['pending', 'approved', 'active'] as const)(
+			'allows a stranger with a %s request on their item',
+			(status) => {
+				const state = createTestState({ borrowRequests: [req(status)] });
+				expect(canViewBorrowerFeedback('user3', 'user1', state)).toBe(true);
+			}
+		);
+
+		it.each(['completed', 'denied', 'cancelled'] as const)(
+			'hides it from a stranger with only a %s request',
+			(status) => {
+				const state = createTestState({ borrowRequests: [req(status)] });
+				expect(canViewBorrowerFeedback('user3', 'user1', state)).toBe(false);
+			}
+		);
+
+		it('ignores requests addressed to a different lender', () => {
+			const state = createTestState({ borrowRequests: [req('pending', { lenderId: 'user2' })] });
+			expect(canViewBorrowerFeedback('user3', 'user1', state)).toBe(false);
+		});
+	});
+
+	describe('getBorrowerFeedback', () => {
+		const hist = (id: string, over: Partial<BorrowHistory>): BorrowHistory => ({
+			id,
+			itemId: 'gone-item',
+			borrowerId: 'user3',
+			lenderId: 'gone-lender',
+			startDate: '2025-01-01',
+			endDate: '2025-01-05',
+			...over
+		});
+
+		it('returns only feedback about the user as borrower, newest first', () => {
+			const state = createTestState({
+				borrowHistory: [
+					hist('old', { borrowerRating: 4, endDate: '2025-01-05' }),
+					hist('new', { borrowerReview: 'Great', endDate: '2025-03-05' }),
+					hist('none', { endDate: '2025-04-05' }),
+					hist('blank', { borrowerReview: '  ', endDate: '2025-04-06' }),
+					hist('as-lender', { borrowerId: 'user1', lenderId: 'user3', borrowerRating: 5 }),
+					hist('other', { borrowerId: 'user2', borrowerRating: 5 })
+				]
+			});
+			expect(getBorrowerFeedback('user3', state).map((h) => h.id)).toEqual(['new', 'old']);
+		});
+
+		it('tolerates a missing item or lender', () => {
+			const state = createTestState({ borrowHistory: [hist('h', { borrowerRating: 3 })] });
+			expect(getBorrowerFeedback('user3', state)).toHaveLength(1);
+		});
 	});
 });
