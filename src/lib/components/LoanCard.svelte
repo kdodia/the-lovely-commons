@@ -10,6 +10,7 @@
   import { formatDisplayDate, toLocalISODate, todayLocalISO } from '$lib/dates';
   import { DATE_FORMAT_OPTIONS } from '$lib/constants';
   import FallbackImage from './FallbackImage.svelte';
+  import RequestThread from './RequestThread.svelte';
 
   interface Props {
     request: BorrowRequest;
@@ -20,9 +21,11 @@
     onCancel?: (requestId: string) => void;
     /** Lender only: ask the borrower to bring back an overdue item. */
     onSendReminder?: (requestId: string) => void;
+    /** Add to the request's message thread; see RequestThread. */
+    onSendMessage?: (requestId: string, text: string) => boolean;
   }
 
-  let { request, perspective, onConfirmPickup, onConfirmReturn, onCancel, onSendReminder }: Props =
+  let { request, perspective, onConfirmPickup, onConfirmReturn, onCancel, onSendReminder, onSendMessage }: Props =
     $props();
 
   let item = $derived($appStore.items.find((i) => i.id === request.itemId));
@@ -117,6 +120,8 @@
           </span>
         {/if}
       </div>
+
+      <RequestThread {request} onSend={onSendMessage} />
     </div>
   </div>
 

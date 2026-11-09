@@ -48,6 +48,14 @@ export interface LenderReturnFeedback {
   condition?: ItemCondition;
 }
 
+/** One entry in the two-person thread on a borrow request. */
+export interface RequestMessage {
+  id: string;
+  fromUserId: string;
+  text: string;
+  at: string; // ISO timestamp
+}
+
 export interface BorrowRequest {
   id: string;
   itemId: string;
@@ -69,6 +77,12 @@ export interface BorrowRequest {
   returnConfirmedBy?: string[];
   /** Stashed when the lender confirms the return before the borrower does. */
   lenderReturnFeedback?: LenderReturnFeedback;
+  /**
+   * Follow-up messages between borrower and lender, oldest first. `message`
+   * above is the borrower's opening line and is not repeated here. Requests
+   * from older versions lack this — read with `?? []`.
+   */
+  messages?: RequestMessage[];
 }
 
 export interface BorrowHistory {
@@ -151,6 +165,7 @@ export interface Notification {
     | 'friend-request-accepted'
     | 'friend-request-declined'
     | 'request-nudge'
+    | 'request-message'
     | 'wishlist-available';
   title: string;
   message: string;

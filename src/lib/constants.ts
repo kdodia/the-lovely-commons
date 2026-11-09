@@ -14,6 +14,8 @@ export const DESCRIPTION_PREVIEW_LENGTH = 80; // Characters to show in item desc
 export const MAX_RATING = 5; // Maximum rating value
 export const MIN_RATING = 1; // Minimum rating value
 export const DEFAULT_RATING = 5; // Default rating for returns
+export const REQUEST_MESSAGE_MAX_LENGTH = 500; // Characters allowed in one request-thread message
+export const REQUEST_MESSAGE_PREVIEW_LENGTH = 60; // Characters of a message quoted in its notification
 
 // Date formats
 export const DATE_FORMAT_OPTIONS = {

@@ -466,7 +466,27 @@ export const mockBorrowRequests: BorrowRequest[] = [
     message: 'Making a big batch of pesto for a party!',
     createdAt: timestampDaysAgo(6),
     pickupConfirmedBy: ['user2', 'user1'],
-    returnConfirmedBy: []
+    returnConfirmedBy: [],
+    messages: [
+      {
+        id: 'msg-req3-1',
+        fromUserId: 'user1',
+        text: "Sure! I'm home tomorrow after 6 if you want to grab it then.",
+        at: timestampDaysAgo(5, 18)
+      },
+      {
+        id: 'msg-req3-2',
+        fromUserId: 'user2',
+        text: 'Tomorrow works. Is the dough blade in the box too?',
+        at: timestampDaysAgo(5, 19)
+      },
+      {
+        id: 'msg-req3-3',
+        fromUserId: 'user1',
+        text: 'Yep, all the blades are in the side pocket. See you then!',
+        at: timestampDaysAgo(5, 20)
+      }
+    ]
   },
   {
     id: 'req4',
@@ -477,7 +497,15 @@ export const mockBorrowRequests: BorrowRequest[] = [
     endDate: daysFromNow(6),
     status: 'pending',
     message: 'Meal prepping for the week — would this weekend work?',
-    createdAt: timestampDaysAgo(1, 9)
+    createdAt: timestampDaysAgo(1, 9),
+    messages: [
+      {
+        id: 'msg-req4-1',
+        fromUserId: 'user3',
+        text: 'I could also pick it up the evening before if that suits you better.',
+        at: timestampDaysAgo(1, 11)
+      }
+    ]
   },
   {
     // Overdue: Sarah (default user) sees it as a late loan she can send a

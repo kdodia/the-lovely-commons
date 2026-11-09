@@ -11,6 +11,22 @@
     appStore.markAllNotificationsAsRead($appStore.currentUserId);
   }
 
+  // A message lands on the tab where the recipient sees that request: pending
+  // requests are under Incoming/My Requests, open loans under Lending/Borrowing.
+  function messageDestination(notification: Notification): string {
+    const request = $appStore.borrowRequests.find((r) => r.id === notification.relatedId);
+    if (!request) return '/dashboard';
+    const isLender = request.lenderId === notification.userId;
+    if (request.status === 'approved' || request.status === 'active') {
+      return `/dashboard?tab=${isLender ? 'lending' : 'borrowing'}`;
+    }
+    // Closed requests only stay listed for the borrower (My Requests)
+    if (request.status === 'pending' || !isLender) {
+      return `/dashboard?tab=${isLender ? 'incoming' : 'outgoing'}`;
+    }
+    return '/dashboard';
+  }
+
   function handleNotificationClick(notification: Notification) {
     markAsRead(notification.id);
     switch (notification.type) {
@@ -28,6 +44,9 @@
       case 'return-reminder':
         // Sent to the borrower: their overdue loan is on the Borrowing tab
         goto('/dashboard?tab=borrowing');
+        break;
+      case 'request-message':
+        goto(messageDestination(notification));
         break;
       default:
         // Borrow lifecycle notifications are handled on the dashboard
@@ -85,6 +104,8 @@
                 📪
               {:else if notification.type === 'request-nudge'}
                 👋
+              {:else if notification.type === 'request-message'}
+                💬
               {:else if notification.type === 'request-cancelled'}
                 🚫
               {:else if notification.type === 'pickup-confirmed'}

@@ -12,6 +12,7 @@
   import { page } from '$app/stores';
   import Toast from '$lib/components/Toast.svelte';
   import LoanCard from '$lib/components/LoanCard.svelte';
+  import RequestThread from '$lib/components/RequestThread.svelte';
   import { MAX_RATING, MIN_RATING, DEFAULT_RATING } from '$lib/constants';
   import { formatDisplayDate } from '$lib/dates';
   import { useToast } from '$lib/useToast.svelte';
@@ -116,6 +117,16 @@
     const loan = $appStore.borrowRequests.find((r) => r.id === requestId);
     const borrower = $appStore.users.find((u) => u.id === loan?.borrowerId);
     toaster.showToast(`Reminder sent to ${borrower?.name ?? 'the borrower'}`, 'success');
+  }
+
+  // Which request threads are expanded, so the incoming card can drop its
+  // quote of the opening message while the thread shows it.
+  let openThreads = $state<Record<string, boolean>>({});
+
+  function sendMessage(requestId: string, text: string): boolean {
+    const result = appStore.sendRequestMessage(requestId, text);
+    if (!result.ok) toaster.showToast(result.error, 'error');
+    return result.ok;
   }
 
   function confirmPickup(requestId: string) {
@@ -357,9 +368,13 @@
                         >{formatDisplayDate(request.startDate)} - {formatDisplayDate(request.endDate)}</span
                       >
                     </div>
-                    {#if request.message}
+                    {#if request.message && !openThreads[request.id]}
                       <p class="request-message">"{request.message}"</p>
                     {/if}
+                    <RequestThread {request} onSend={sendMessage} bind:open={
+                        () => openThreads[request.id] ?? false,
+                        (open) => (openThreads[request.id] = open)
+                      } />
                   </div>
                 </div>
                 <div class="request-actions">
@@ -423,6 +438,7 @@
                         <span class="badge badge-error">✗ Declined</span>
                       {/if}
                     </div>
+                    <RequestThread {request} onSend={sendMessage} />
                   </div>
                 </div>
                 {#if request.status === 'pending'}
@@ -463,6 +479,7 @@
                 onConfirmReturn={openReturnModal}
                 onCancel={cancelRequest}
                 onSendReminder={sendReminder}
+                onSendMessage={sendMessage}
               />
             {/each}
           {/if}
@@ -487,6 +504,7 @@
                 onConfirmPickup={confirmPickup}
                 onConfirmReturn={confirmReturnAsBorrower}
                 onCancel={cancelRequest}
+                onSendMessage={sendMessage}
               />
             {/each}
           {/if}
@@ -735,6 +753,7 @@
     display: flex;
     gap: 1.5rem;
     flex: 1;
+    min-width: 0;
   }
 
   .request-item-link {
@@ -761,6 +780,7 @@
     flex-direction: column;
     gap: 0.75rem;
     flex: 1;
+    min-width: 0;
   }
 
   .request-title-link {
@@ -835,6 +855,7 @@
     background-color: var(--surface);
     border-radius: var(--radius);
     border-left: 3px solid var(--primary);
+    overflow-wrap: anywhere;
   }
 
   .request-actions {

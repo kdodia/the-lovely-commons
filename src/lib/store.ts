@@ -10,6 +10,7 @@ import type {
   Tag,
   FriendRequest,
   LenderReturnFeedback,
+  RequestMessage,
   WishlistItem
 } from './types';
 import { initialAppState } from './mockData';
@@ -26,6 +27,8 @@ import {
   MAX_RATING,
   MIN_RATING,
   NUDGE_DELAY_DAYS,
+  REQUEST_MESSAGE_MAX_LENGTH,
+  REQUEST_MESSAGE_PREVIEW_LENGTH,
   RETURN_REMINDER_COOLDOWN_DAYS
 } from './constants';
 
@@ -619,6 +622,74 @@ function createAppStore() {
             r.id === requestId ? { ...r, status: 'cancelled' as const } : r
           ),
           notifications: [...state.notifications, ...notifications]
+        };
+      });
+      return result;
+    },
+
+    /**
+     * Borrower or lender adds a message to the request's thread, e.g. to agree
+     * a pickup time. Open while the request is pending, approved or active;
+     * the other party is notified.
+     */
+    sendRequestMessage: (requestId: string, text: string): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Request not found' };
+      update((state) => {
+        const request = state.borrowRequests.find((r) => r.id === requestId);
+        if (!request) return state;
+
+        const actorId = state.currentUserId;
+        const isBorrower = actorId === request.borrowerId;
+        if (!isBorrower && actorId !== request.lenderId) {
+          result = { ok: false, error: 'Only the borrower or lender can message about this request' };
+          return state;
+        }
+        if (!canSendRequestMessage(request, actorId)) {
+          result = { ok: false, error: 'This request is closed, so no new messages can be sent' };
+          return state;
+        }
+
+        const body = text.trim();
+        if (!body) {
+          result = { ok: false, error: 'Write a message before sending' };
+          return state;
+        }
+        if (body.length > REQUEST_MESSAGE_MAX_LENGTH) {
+          result = {
+            ok: false,
+            error: `Messages can be at most ${REQUEST_MESSAGE_MAX_LENGTH} characters (this one is ${body.length})`
+          };
+          return state;
+        }
+
+        const message: RequestMessage = {
+          id: createId('msg'),
+          fromUserId: actorId,
+          text: body,
+          at: new Date().toISOString()
+        };
+
+        const item = state.items.find((i) => i.id === request.itemId);
+        const actor = state.users.find((u) => u.id === actorId);
+        const preview =
+          body.length > REQUEST_MESSAGE_PREVIEW_LENGTH
+            ? `${body.slice(0, REQUEST_MESSAGE_PREVIEW_LENGTH).trimEnd()}…`
+            : body;
+        const notification = createNotification(
+          isBorrower ? request.lenderId : request.borrowerId,
+          'request-message',
+          'New Message',
+          `${actor?.name ?? 'Someone'} about ${item?.name ?? 'your request'}: "${preview}"`,
+          requestId
+        );
+
+        result = { ok: true };
+        return {
+          ...state,
+          borrowRequests: state.borrowRequests.map((r) =>
+            r.id === requestId ? { ...r, messages: [...(r.messages ?? []), message] } : r
+          ),
+          notifications: [...state.notifications, notification]
         };
       });
       return result;
@@ -1321,6 +1392,18 @@ export function hasConfirmed(
 ): boolean {
   const list = step === 'pickup' ? request.pickupConfirmedBy : request.returnConfirmedBy;
   return (list ?? []).includes(userId);
+}
+
+/**
+ * Whether a user may add to a request's message thread: they are its borrower
+ * or lender and it is still open (pending, approved or active).
+ */
+export function canSendRequestMessage(request: BorrowRequest, userId: string): boolean {
+  const isParty = userId === request.borrowerId || userId === request.lenderId;
+  return (
+    isParty &&
+    (request.status === 'pending' || request.status === 'approved' || request.status === 'active')
+  );
 }
 
 export const incomingFriendRequests = derived(appStore, ($state) =>
