@@ -5,6 +5,7 @@
 
 // Time-related constants
 export const NUDGE_DELAY_DAYS = 3; // Days to wait before allowing nudge
+export const RETURN_REMINDER_COOLDOWN_DAYS = 2; // Days between overdue-return reminders
 export const CALENDAR_PREVIEW_DAYS = 90; // Number of days to show in calendar
 export const TOAST_DURATION_MS = 3000; // Duration to show toast notifications
 

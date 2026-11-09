@@ -380,7 +380,7 @@ export const mockItems: Item[] = [
     tagIds: ['tag4'],
     rating: 4.7,
     totalBorrows: 10,
-    available: true,
+    available: false,
     createdAt: '2024-03-01T10:00:00Z'
   },
   {
@@ -478,6 +478,21 @@ export const mockBorrowRequests: BorrowRequest[] = [
     status: 'pending',
     message: 'Meal prepping for the week — would this weekend work?',
     createdAt: timestampDaysAgo(1, 9)
+  },
+  {
+    // Overdue: Sarah (default user) sees it as a late loan she can send a
+    // reminder about; switch to Emily to see the borrower's side.
+    id: 'req5',
+    itemId: 'item14',
+    borrowerId: 'user3',
+    lenderId: 'user1',
+    startDate: daysFromNow(-10),
+    endDate: daysFromNow(-3),
+    status: 'active',
+    message: "Hosting a karaoke night for my sister's birthday!",
+    createdAt: timestampDaysAgo(12),
+    pickupConfirmedBy: ['user3', 'user1'],
+    returnConfirmedBy: []
   }
 ];
 

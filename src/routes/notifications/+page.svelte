@@ -25,6 +25,10 @@
       case 'friend-request-declined':
         goto('/network');
         break;
+      case 'return-reminder':
+        // Sent to the borrower: their overdue loan is on the Borrowing tab
+        goto('/dashboard?tab=borrowing');
+        break;
       default:
         // Borrow lifecycle notifications are handled on the dashboard
         goto('/dashboard');

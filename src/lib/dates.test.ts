@@ -6,7 +6,8 @@ import {
 	addDays,
 	startOfLocalDay,
 	formatDisplayDate,
-	rangesOverlap
+	rangesOverlap,
+	daysBetween
 } from './dates';
 
 // These tests are meaningful in any timezone — run them with e.g.
@@ -96,5 +97,20 @@ describe('rangesOverlap', () => {
 	it('handles single-day ranges', () => {
 		expect(rangesOverlap('2026-01-10', '2026-01-10', '2026-01-10', '2026-01-10')).toBe(true);
 		expect(rangesOverlap('2026-01-10', '2026-01-10', '2026-01-11', '2026-01-11')).toBe(false);
+	});
+});
+
+describe('daysBetween', () => {
+	it('counts whole calendar days in either direction', () => {
+		expect(daysBetween('2026-01-10', '2026-01-10')).toBe(0);
+		expect(daysBetween('2026-01-10', '2026-01-13')).toBe(3);
+		expect(daysBetween('2026-01-13', '2026-01-10')).toBe(-3);
+		expect(daysBetween('2026-02-27', '2026-03-02')).toBe(3);
+	});
+
+	it('is not thrown off by daylight-saving changes', () => {
+		// Spans the US (March) and NZ (April) DST transitions
+		expect(daysBetween('2026-03-01', '2026-03-15')).toBe(14);
+		expect(daysBetween('2026-04-01', '2026-04-10')).toBe(9);
 	});
 });
