@@ -15,6 +15,7 @@ import {
 	hasConfirmed,
 	pendingItemReviews,
 	isOverdue,
+	sortOverdueFirst,
 	daysOverdue,
 	nextReturnReminderDate,
 	overdueLentLoans,
@@ -1876,5 +1877,136 @@ describe('sendRequestMessage', () => {
 	it('reports a missing request', () => {
 		setup();
 		expect(appStore.sendRequestMessage('nope', 'Hi')).toEqual({ ok: false, error: 'Request not found' });
+	});
+});
+
+describe('overdue ordering and announcements', () => {
+	const NOW = new Date(2030, 0, 15, 12, 0, 0);
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(NOW);
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	function loan(id: string, overrides: Partial<BorrowRequest> = {}): BorrowRequest {
+		return createLifecycleRequest({ id, status: 'active', endDate: '2030-01-12', ...overrides });
+	}
+
+	const items = [createTestItem({ lenderId: 'user2', available: false })];
+
+	describe('sortOverdueFirst', () => {
+		it('puts overdue loans first, most overdue first, and keeps the rest in order', () => {
+			const loans = [
+				loan('approved', { status: 'approved' }),
+				loan('due-today', { endDate: '2030-01-15' }),
+				loan('late-3', { endDate: '2030-01-12' }),
+				loan('future', { endDate: '2030-01-20' }),
+				loan('late-10', { endDate: '2030-01-05' }),
+				loan('late-3-b', { endDate: '2030-01-12' })
+			];
+			const sorted = sortOverdueFirst(loans);
+			expect(sorted.map((r) => r.id)).toEqual([
+				'late-10',
+				'late-3',
+				'late-3-b',
+				'approved',
+				'due-today',
+				'future'
+			]);
+			expect(loans[0].id).toBe('approved'); // input is not mutated
+		});
+
+		it('accepts an explicit today and handles an empty list', () => {
+			expect(sortOverdueFirst([])).toEqual([]);
+			const loans = [loan('a', { endDate: '2030-01-12' }), loan('b', { endDate: '2030-01-10' })];
+			expect(sortOverdueFirst(loans, '2030-01-11').map((r) => r.id)).toEqual(['b', 'a']);
+		});
+	});
+
+	describe('notifyOverdueLoans', () => {
+		function overdueNotes() {
+			return get(appStore).notifications.filter(
+				(n) => n.type === 'return-reminder' || n.type === 'loan-overdue'
+			);
+		}
+
+		it('tells the borrower and the lender once and marks the loan announced', () => {
+			appStore.replaceState(createTestState({ items, borrowRequests: [loan('req1')] }));
+
+			expect(appStore.notifyOverdueLoans()).toBe(1);
+
+			const notes = overdueNotes();
+			expect(notes).toHaveLength(2);
+			const toBorrower = notes.find((n) => n.userId === 'user1');
+			const toLender = notes.find((n) => n.userId === 'user2');
+			expect(toBorrower?.type).toBe('return-reminder');
+			expect(toBorrower?.message).toContain('Test Item');
+			expect(toBorrower?.message).toContain('Please return it');
+			expect(toLender?.type).toBe('loan-overdue');
+			expect(toLender?.message).toContain('is now overdue');
+			expect(toLender?.message).toContain('Test User 1');
+			expect(notes.every((n) => n.relatedId === 'req1')).toBe(true);
+			expect(get(appStore).borrowRequests[0].overdueNotifiedAt).toBe(NOW.toISOString());
+			// Independent of the manual reminder cooldown
+			expect(get(appStore).borrowRequests[0].lastRemindedAt).toBeUndefined();
+		});
+
+		it('is idempotent: a second run adds nothing and leaves state untouched', () => {
+			appStore.replaceState(createTestState({ items, borrowRequests: [loan('req1')] }));
+			appStore.notifyOverdueLoans();
+			const before = get(appStore);
+
+			expect(appStore.notifyOverdueLoans()).toBe(0);
+			expect(get(appStore)).toBe(before);
+		});
+
+		it('ignores loans due today, not yet picked up, or completed', () => {
+			appStore.replaceState(
+				createTestState({
+					borrowRequests: [
+						loan('due-today', { endDate: '2030-01-15' }),
+						loan('approved', { status: 'approved' }),
+						loan('completed', { status: 'completed' })
+					]
+				})
+			);
+			const before = get(appStore);
+
+			expect(appStore.notifyOverdueLoans()).toBe(0);
+			expect(get(appStore)).toBe(before);
+		});
+
+		it("announces loans between other users, not only the current user's", () => {
+			appStore.replaceState(
+				createTestState({
+					currentUserId: 'user1',
+					items,
+					borrowRequests: [loan('others', { borrowerId: 'user3', lenderId: 'user2' })]
+				})
+			);
+
+			expect(appStore.notifyOverdueLoans()).toBe(1);
+			expect(
+				overdueNotes()
+					.map((n) => n.userId)
+					.sort()
+			).toEqual(['user2', 'user3']);
+		});
+
+		it('still allows a manual reminder afterwards', () => {
+			appStore.replaceState(
+				createTestState({
+					currentUserId: 'user2',
+					items: [createTestItem({ lenderId: 'user2', available: false })],
+					borrowRequests: [loan('req1')]
+				})
+			);
+			appStore.notifyOverdueLoans();
+			expect(appStore.sendReturnReminder('req1')).toEqual({ ok: true });
+		});
 	});
 });

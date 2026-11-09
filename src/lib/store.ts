@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { browser } from '$app/environment';
 import type {
   AppState,
@@ -1019,6 +1019,63 @@ function createAppStore() {
       return result;
     },
 
+    /**
+     * Announce newly overdue loans, once each, to both people: the borrower
+     * is asked to return the item and the lender is told it's late. Looks at
+     * every request (state is shared by all users) and marks each as
+     * announced, so running it again is a no-op that doesn't write state.
+     * Returns how many loans were announced.
+     */
+    notifyOverdueLoans: (): number => {
+      const today = todayLocalISO();
+      const pending = get({ subscribe }).borrowRequests.filter(
+        (r) => isOverdue(r, today) && !r.overdueNotifiedAt
+      );
+      if (pending.length === 0) return 0;
+
+      let announced = 0;
+      update((state) => {
+        const announcedAt = new Date().toISOString();
+        const notifications: Notification[] = [];
+        const announcedIds = new Set<string>();
+        for (const request of state.borrowRequests) {
+          if (!isOverdue(request, today) || request.overdueNotifiedAt) continue;
+          const item = state.items.find((i) => i.id === request.itemId);
+          const lender = state.users.find((u) => u.id === request.lenderId);
+          const borrower = state.users.find((u) => u.id === request.borrowerId);
+          if (!item || !lender || !borrower) continue;
+
+          notifications.push(
+            createNotification(
+              request.borrowerId,
+              'return-reminder',
+              'Return Reminder',
+              `${lender.name}'s ${item.name} was due back on ${formatDisplayDate(request.endDate, DATE_FORMAT_OPTIONS.short)}. Please return it.`,
+              request.id
+            ),
+            createNotification(
+              request.lenderId,
+              'loan-overdue',
+              'Loan Overdue',
+              `${item.name}, lent to ${borrower.name}, is now overdue.`,
+              request.id
+            )
+          );
+          announcedIds.add(request.id);
+        }
+        announced = announcedIds.size;
+        if (announced === 0) return state;
+        return {
+          ...state,
+          borrowRequests: state.borrowRequests.map((r) =>
+            announcedIds.has(r.id) ? { ...r, overdueNotifiedAt: announcedAt } : r
+          ),
+          notifications: [...state.notifications, ...notifications]
+        };
+      });
+      return announced;
+    },
+
     // Tag actions
     createTag: (tag: Tag) => {
       update((state) => ({
@@ -1357,6 +1414,17 @@ export const overdueBorrowedLoans = derived(appStore, ($state) => {
  */
 export function isOverdue(request: BorrowRequest, today: string = todayLocalISO()): boolean {
   return request.status === 'active' && request.endDate < today;
+}
+
+/**
+ * The loans with overdue ones first, most overdue first. Everything else
+ * keeps its original order (the sort is stable).
+ */
+export function sortOverdueFirst(
+  loans: BorrowRequest[],
+  today: string = todayLocalISO()
+): BorrowRequest[] {
+  return [...loans].sort((a, b) => daysOverdue(b, today) - daysOverdue(a, today));
 }
 
 /** Whole days an overdue loan is past its end date; 0 when not overdue. */

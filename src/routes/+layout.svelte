@@ -46,6 +46,17 @@
     }
   });
 
+  // Announce loans that have gone overdue: on load, and when a tab left open
+  // overnight becomes visible again. Effects only run in the browser.
+  $effect(() => {
+    appStore.notifyOverdueLoans();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') appStore.notifyOverdueLoans();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  });
+
   // User switcher (demo affordance: lets you experience each permission tier)
   let showUserMenu = $state(false);
   let userMenuElement = $state<HTMLDivElement | undefined>();

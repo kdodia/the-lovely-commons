@@ -7,7 +7,8 @@
     activeLoans,
     borrowedByMe,
     overdueLentLoans,
-    overdueBorrowedLoans
+    overdueBorrowedLoans,
+    sortOverdueFirst
   } from '$lib/store';
   import { page } from '$app/stores';
   import Toast from '$lib/components/Toast.svelte';
@@ -44,9 +45,11 @@
 
   let lendingCount = $derived($approvedLoans.length + $activeLoans.length);
   // Approved-then-active ordering keeps "pick up soon" above "on loan".
-  let lendingLoans = $derived([...$approvedLoans, ...$activeLoans]);
+  let lendingLoans = $derived(sortOverdueFirst([...$approvedLoans, ...$activeLoans]));
   let borrowingLoans = $derived(
-    [...$borrowedByMe].sort((a, b) => (a.status === b.status ? 0 : a.status === 'approved' ? -1 : 1))
+    sortOverdueFirst(
+      [...$borrowedByMe].sort((a, b) => (a.status === b.status ? 0 : a.status === 'approved' ? -1 : 1))
+    )
   );
 
   // Return modal state (lender side: rates the borrower, records condition)

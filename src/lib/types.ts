@@ -68,6 +68,7 @@ export interface BorrowRequest {
   createdAt: string;
   lastNudgedAt?: string; // When the borrower last sent a reminder to the lender
   lastRemindedAt?: string; // When the lender last asked for an overdue item back
+  overdueNotifiedAt?: string; // When both people were automatically told this loan is overdue
   /**
    * Two-sided handoff: user ids that have confirmed the pickup / return. The
    * loan only advances once both the borrower and the lender are present.
@@ -156,6 +157,7 @@ export interface Notification {
     | 'request-denied'
     | 'request-cancelled'
     | 'return-reminder'
+    | 'loan-overdue'
     | 'item-returned'
     | 'pickup-confirmed'
     | 'return-confirmed'

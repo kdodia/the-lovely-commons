@@ -48,6 +48,10 @@
       case 'request-message':
         goto(messageDestination(notification));
         break;
+      case 'loan-overdue':
+        // Sent to the lender: the late loan is on the Lending tab
+        goto('/dashboard?tab=lending');
+        break;
       default:
         // Borrow lifecycle notifications are handled on the dashboard
         goto('/dashboard');
@@ -93,6 +97,8 @@
               {:else if notification.type === 'request-denied'}
                 ❌
               {:else if notification.type === 'return-reminder'}
+                ⏰
+              {:else if notification.type === 'loan-overdue'}
                 ⏰
               {:else if notification.type === 'item-returned'}
                 📦
