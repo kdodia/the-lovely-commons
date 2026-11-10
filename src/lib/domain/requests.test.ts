@@ -3,6 +3,7 @@ import { get } from 'svelte/store';
 import { appStore } from '$lib/store';
 import type { BorrowRequest } from '$lib/types';
 import { createTestState, createTestItem, createLifecycleRequest, confirmBothSides } from '../../test/fixtures';
+import { approveRequest, cancelRequest, nextNudgeDate } from './requests';
 
 describe('appStore actions', () => {
 	beforeEach(() => {
@@ -270,5 +271,52 @@ describe('cancelRequest', () => {
 		appStore.setCurrentUser('user1');
 		expect(appStore.cancelRequest('active').ok).toBe(false);
 		expect(get(appStore).borrowRequests.every((r) => r.status !== 'cancelled')).toBe(true);
+	});
+});
+
+// Direct tests of the rules, without the store.
+
+describe('request rules as pure transitions', () => {
+	it('returns the same state object, untouched, when a rule refuses', () => {
+		const state = createTestState({
+			items: [createTestItem({ lenderId: 'user2' })],
+			borrowRequests: [createLifecycleRequest({ status: 'approved' })]
+		});
+		const snapshot = structuredClone(state);
+
+		const { state: next, result } = approveRequest(state, 'req1');
+		expect(result).toEqual({ ok: false, error: 'Only pending requests can be approved' });
+		expect(next).toBe(state);
+		expect(state).toEqual(snapshot);
+	});
+
+	it('builds the next state without mutating the one it was given', () => {
+		const state = createTestState({
+			items: [createTestItem({ lenderId: 'user2', available: false })],
+			borrowRequests: [createLifecycleRequest({ status: 'approved' })]
+		});
+		const snapshot = structuredClone(state);
+
+		const { state: next, result } = cancelRequest(state, 'req1');
+		expect(result).toEqual({ ok: true });
+		expect(next).not.toBe(state);
+		expect(next.borrowRequests[0].status).toBe('cancelled');
+		expect(next.items[0].available).toBe(true);
+		expect(state).toEqual(snapshot);
+	});
+});
+
+describe('nextNudgeDate', () => {
+	it('counts NUDGE_DELAY_DAYS calendar days from when the request was made', () => {
+		const createdAt = new Date(2030, 0, 10, 23, 30).toISOString();
+		expect(nextNudgeDate(createLifecycleRequest({ createdAt }))).toBe('2030-01-13');
+	});
+
+	it('counts from the last nudge once there has been one', () => {
+		const request = createLifecycleRequest({
+			createdAt: new Date(2030, 0, 1, 9, 0).toISOString(),
+			lastNudgedAt: new Date(2030, 0, 20, 0, 15).toISOString()
+		});
+		expect(nextNudgeDate(request)).toBe('2030-01-23');
 	});
 });
