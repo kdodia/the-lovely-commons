@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { browser } from '$app/environment';
 import type {
   AppState,
@@ -10,11 +10,27 @@ import type {
   Tag,
   FriendRequest,
   LenderReturnFeedback,
+  RequestMessage,
   WishlistItem
 } from './types';
 import { initialAppState } from './mockData';
-import { rangesOverlap, todayLocalISO } from './dates';
-import { MAX_RATING, MIN_RATING, NUDGE_DELAY_DAYS } from './constants';
+import {
+  addDays,
+  daysBetween,
+  formatDisplayDate,
+  rangesOverlap,
+  toLocalISODate,
+  todayLocalISO
+} from './dates';
+import {
+  DATE_FORMAT_OPTIONS,
+  MAX_RATING,
+  MIN_RATING,
+  NUDGE_DELAY_DAYS,
+  REQUEST_MESSAGE_MAX_LENGTH,
+  REQUEST_MESSAGE_PREVIEW_LENGTH,
+  RETURN_REMINDER_COOLDOWN_DAYS
+} from './constants';
 
 export const STORAGE_KEY = 'distributed-library-app-state';
 
@@ -612,6 +628,74 @@ function createAppStore() {
     },
 
     /**
+     * Borrower or lender adds a message to the request's thread, e.g. to agree
+     * a pickup time. Open while the request is pending, approved or active;
+     * the other party is notified.
+     */
+    sendRequestMessage: (requestId: string, text: string): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Request not found' };
+      update((state) => {
+        const request = state.borrowRequests.find((r) => r.id === requestId);
+        if (!request) return state;
+
+        const actorId = state.currentUserId;
+        const isBorrower = actorId === request.borrowerId;
+        if (!isBorrower && actorId !== request.lenderId) {
+          result = { ok: false, error: 'Only the borrower or lender can message about this request' };
+          return state;
+        }
+        if (!canSendRequestMessage(request, actorId)) {
+          result = { ok: false, error: 'This request is closed, so no new messages can be sent' };
+          return state;
+        }
+
+        const body = text.trim();
+        if (!body) {
+          result = { ok: false, error: 'Write a message before sending' };
+          return state;
+        }
+        if (body.length > REQUEST_MESSAGE_MAX_LENGTH) {
+          result = {
+            ok: false,
+            error: `Messages can be at most ${REQUEST_MESSAGE_MAX_LENGTH} characters (this one is ${body.length})`
+          };
+          return state;
+        }
+
+        const message: RequestMessage = {
+          id: createId('msg'),
+          fromUserId: actorId,
+          text: body,
+          at: new Date().toISOString()
+        };
+
+        const item = state.items.find((i) => i.id === request.itemId);
+        const actor = state.users.find((u) => u.id === actorId);
+        const preview =
+          body.length > REQUEST_MESSAGE_PREVIEW_LENGTH
+            ? `${body.slice(0, REQUEST_MESSAGE_PREVIEW_LENGTH).trimEnd()}…`
+            : body;
+        const notification = createNotification(
+          isBorrower ? request.lenderId : request.borrowerId,
+          'request-message',
+          'New Message',
+          `${actor?.name ?? 'Someone'} about ${item?.name ?? 'your request'}: "${preview}"`,
+          requestId
+        );
+
+        result = { ok: true };
+        return {
+          ...state,
+          borrowRequests: state.borrowRequests.map((r) =>
+            r.id === requestId ? { ...r, messages: [...(r.messages ?? []), message] } : r
+          ),
+          notifications: [...state.notifications, notification]
+        };
+      });
+      return result;
+    },
+
+    /**
      * Either party confirms the physical handoff. The loan becomes active
      * only once both the borrower and the lender have confirmed.
      */
@@ -857,6 +941,139 @@ function createAppStore() {
         };
       });
       return result;
+    },
+
+    /**
+     * The lender asks the borrower to bring back an overdue item. Limited to
+     * one reminder per RETURN_REMINDER_COOLDOWN_DAYS so it stays a nudge.
+     */
+    sendReturnReminder: (requestId: string): ActionResult => {
+      let result: ActionResult = { ok: false, error: 'Loan not found' };
+      update((state) => {
+        const request = state.borrowRequests.find((r) => r.id === requestId);
+        if (!request) return state;
+
+        if (request.lenderId !== state.currentUserId) {
+          result = { ok: false, error: 'Only the lender can send a return reminder' };
+          return state;
+        }
+        if (request.status !== 'active') {
+          result = { ok: false, error: 'Reminders can only be sent for items currently on loan' };
+          return state;
+        }
+
+        const today = todayLocalISO();
+        if (!isOverdue(request, today)) {
+          result = {
+            ok: false,
+            error: `This loan isn't overdue yet — it's due back ${formatDisplayDate(request.endDate, DATE_FORMAT_OPTIONS.short)}`
+          };
+          return state;
+        }
+
+        const item = state.items.find((i) => i.id === request.itemId);
+        const lender = state.users.find((u) => u.id === request.lenderId);
+        const borrower = state.users.find((u) => u.id === request.borrowerId);
+        if (!item || !lender || !borrower) {
+          result = { ok: false, error: 'Item or borrower no longer exists' };
+          return state;
+        }
+
+        // Once the borrower has confirmed the hand-back, the lender just needs
+        // to confirm on their side.
+        if (hasConfirmed(request, 'return', request.borrowerId)) {
+          result = {
+            ok: false,
+            error: `${borrower.name} already confirmed the return — confirm on your side to finish`
+          };
+          return state;
+        }
+
+        const nextAllowed = nextReturnReminderDate(request);
+        if (nextAllowed && today < nextAllowed) {
+          result = {
+            ok: false,
+            error: `You already sent a reminder — you can send another on ${formatDisplayDate(nextAllowed, DATE_FORMAT_OPTIONS.short)}`
+          };
+          return state;
+        }
+
+        const days = daysOverdue(request, today);
+        const notification = createNotification(
+          request.borrowerId,
+          'return-reminder',
+          'Return Reminder',
+          `${lender.name} is asking for their ${item.name} back — it was due ${days} ${days === 1 ? 'day' : 'days'} ago`,
+          requestId
+        );
+
+        result = { ok: true };
+        return {
+          ...state,
+          borrowRequests: state.borrowRequests.map((r) =>
+            r.id === requestId ? { ...r, lastRemindedAt: new Date().toISOString() } : r
+          ),
+          notifications: [...state.notifications, notification]
+        };
+      });
+      return result;
+    },
+
+    /**
+     * Announce newly overdue loans, once each, to both people: the borrower
+     * is asked to return the item and the lender is told it's late. Looks at
+     * every request (state is shared by all users) and marks each as
+     * announced, so running it again is a no-op that doesn't write state.
+     * Returns how many loans were announced.
+     */
+    notifyOverdueLoans: (): number => {
+      const today = todayLocalISO();
+      const pending = get({ subscribe }).borrowRequests.filter(
+        (r) => isOverdue(r, today) && !r.overdueNotifiedAt
+      );
+      if (pending.length === 0) return 0;
+
+      let announced = 0;
+      update((state) => {
+        const announcedAt = new Date().toISOString();
+        const notifications: Notification[] = [];
+        const announcedIds = new Set<string>();
+        for (const request of state.borrowRequests) {
+          if (!isOverdue(request, today) || request.overdueNotifiedAt) continue;
+          const item = state.items.find((i) => i.id === request.itemId);
+          const lender = state.users.find((u) => u.id === request.lenderId);
+          const borrower = state.users.find((u) => u.id === request.borrowerId);
+          if (!item || !lender || !borrower) continue;
+
+          notifications.push(
+            createNotification(
+              request.borrowerId,
+              'return-reminder',
+              'Return Reminder',
+              `${lender.name}'s ${item.name} was due back on ${formatDisplayDate(request.endDate, DATE_FORMAT_OPTIONS.short)}. Please return it.`,
+              request.id
+            ),
+            createNotification(
+              request.lenderId,
+              'loan-overdue',
+              'Loan Overdue',
+              `${item.name}, lent to ${borrower.name}, is now overdue.`,
+              request.id
+            )
+          );
+          announcedIds.add(request.id);
+        }
+        announced = announcedIds.size;
+        if (announced === 0) return state;
+        return {
+          ...state,
+          borrowRequests: state.borrowRequests.map((r) =>
+            announcedIds.has(r.id) ? { ...r, overdueNotifiedAt: announcedAt } : r
+          ),
+          notifications: [...state.notifications, ...notifications]
+        };
+      });
+      return announced;
     },
 
     // Tag actions
@@ -1175,6 +1392,56 @@ export const borrowedByMe = derived(appStore, ($state) =>
   )
 );
 
+// Active loans past their return date, from each side. "Today" is read when
+// the state changes, which is often enough for a day-granular flag.
+export const overdueLentLoans = derived(appStore, ($state) => {
+  const today = todayLocalISO();
+  return $state.borrowRequests.filter(
+    (req) => req.lenderId === $state.currentUserId && isOverdue(req, today)
+  );
+});
+
+export const overdueBorrowedLoans = derived(appStore, ($state) => {
+  const today = todayLocalISO();
+  return $state.borrowRequests.filter(
+    (req) => req.borrowerId === $state.currentUserId && isOverdue(req, today)
+  );
+});
+
+/**
+ * Whether a loan is overdue: the item has been picked up (`active`) and its
+ * end date is before `today`. Due today is not overdue.
+ */
+export function isOverdue(request: BorrowRequest, today: string = todayLocalISO()): boolean {
+  return request.status === 'active' && request.endDate < today;
+}
+
+/**
+ * The loans with overdue ones first, most overdue first. Everything else
+ * keeps its original order (the sort is stable).
+ */
+export function sortOverdueFirst(
+  loans: BorrowRequest[],
+  today: string = todayLocalISO()
+): BorrowRequest[] {
+  return [...loans].sort((a, b) => daysOverdue(b, today) - daysOverdue(a, today));
+}
+
+/** Whole days an overdue loan is past its end date; 0 when not overdue. */
+export function daysOverdue(request: BorrowRequest, today: string = todayLocalISO()): number {
+  return isOverdue(request, today) ? daysBetween(request.endDate, today) : 0;
+}
+
+/**
+ * The local day ('YYYY-MM-DD') from which the lender may send another return
+ * reminder, or null if they never have. The cooldown counts calendar days so
+ * the store and the dashboard agree on when the button comes back.
+ */
+export function nextReturnReminderDate(request: BorrowRequest): string | null {
+  if (!request.lastRemindedAt) return null;
+  return toLocalISODate(addDays(new Date(request.lastRemindedAt), RETURN_REMINDER_COOLDOWN_DAYS));
+}
+
 /**
  * Completed borrows of an item by a user that haven't been reviewed yet,
  * most recent first. Drives the inline review form on the item page.
@@ -1193,6 +1460,18 @@ export function hasConfirmed(
 ): boolean {
   const list = step === 'pickup' ? request.pickupConfirmedBy : request.returnConfirmedBy;
   return (list ?? []).includes(userId);
+}
+
+/**
+ * Whether a user may add to a request's message thread: they are its borrower
+ * or lender and it is still open (pending, approved or active).
+ */
+export function canSendRequestMessage(request: BorrowRequest, userId: string): boolean {
+  const isParty = userId === request.borrowerId || userId === request.lenderId;
+  return (
+    isParty &&
+    (request.status === 'pending' || request.status === 'approved' || request.status === 'active')
+  );
 }
 
 export const incomingFriendRequests = derived(appStore, ($state) =>
@@ -1268,6 +1547,37 @@ export function canUserViewItem(item: Item, currentUserId: string, state: AppSta
     default:
       return false;
   }
+}
+
+// Lender notes about a borrower are not public: they help someone decide
+// whether to lend, so only the borrower, their friends, and lenders with a
+// live request from them (pending/approved/active) may read them.
+export function canViewBorrowerFeedback(
+  profileUserId: string,
+  viewerId: string,
+  state: AppState
+): boolean {
+  if (profileUserId === viewerId) return true;
+
+  const profileUser = state.users.find((u) => u.id === profileUserId);
+  if (profileUser && isFriendOfLender(profileUser, viewerId)) return true;
+
+  return state.borrowRequests.some(
+    (r) =>
+      r.borrowerId === profileUserId &&
+      r.lenderId === viewerId &&
+      (r.status === 'pending' || r.status === 'approved' || r.status === 'active')
+  );
+}
+
+// Completed borrows where lenders left a rating and/or note about this user as
+// a borrower, newest return first. Does not check who may view them.
+export function getBorrowerFeedback(userId: string, state: AppState): BorrowHistory[] {
+  return state.borrowHistory
+    .filter(
+      (h) => h.borrowerId === userId && (h.borrowerRating != null || !!h.borrowerReview?.trim())
+    )
+    .sort((a, b) => b.endDate.localeCompare(a.endDate));
 }
 
 // Helper to get category path (for breadcrumbs)

@@ -380,7 +380,7 @@ export const mockItems: Item[] = [
     tagIds: ['tag4'],
     rating: 4.7,
     totalBorrows: 10,
-    available: true,
+    available: false,
     createdAt: '2024-03-01T10:00:00Z'
   },
   {
@@ -466,7 +466,27 @@ export const mockBorrowRequests: BorrowRequest[] = [
     message: 'Making a big batch of pesto for a party!',
     createdAt: timestampDaysAgo(6),
     pickupConfirmedBy: ['user2', 'user1'],
-    returnConfirmedBy: []
+    returnConfirmedBy: [],
+    messages: [
+      {
+        id: 'msg-req3-1',
+        fromUserId: 'user1',
+        text: "Sure! I'm home tomorrow after 6 if you want to grab it then.",
+        at: timestampDaysAgo(5, 18)
+      },
+      {
+        id: 'msg-req3-2',
+        fromUserId: 'user2',
+        text: 'Tomorrow works. Is the dough blade in the box too?',
+        at: timestampDaysAgo(5, 19)
+      },
+      {
+        id: 'msg-req3-3',
+        fromUserId: 'user1',
+        text: 'Yep, all the blades are in the side pocket. See you then!',
+        at: timestampDaysAgo(5, 20)
+      }
+    ]
   },
   {
     id: 'req4',
@@ -477,7 +497,30 @@ export const mockBorrowRequests: BorrowRequest[] = [
     endDate: daysFromNow(6),
     status: 'pending',
     message: 'Meal prepping for the week — would this weekend work?',
-    createdAt: timestampDaysAgo(1, 9)
+    createdAt: timestampDaysAgo(1, 9),
+    messages: [
+      {
+        id: 'msg-req4-1',
+        fromUserId: 'user3',
+        text: 'I could also pick it up the evening before if that suits you better.',
+        at: timestampDaysAgo(1, 11)
+      }
+    ]
+  },
+  {
+    // Overdue: Sarah (default user) sees it as a late loan she can send a
+    // reminder about; switch to Emily to see the borrower's side.
+    id: 'req5',
+    itemId: 'item14',
+    borrowerId: 'user3',
+    lenderId: 'user1',
+    startDate: daysFromNow(-10),
+    endDate: daysFromNow(-3),
+    status: 'active',
+    message: "Hosting a karaoke night for my sister's birthday!",
+    createdAt: timestampDaysAgo(12),
+    pickupConfirmedBy: ['user3', 'user1'],
+    returnConfirmedBy: []
   }
 ];
 

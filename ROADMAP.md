@@ -6,7 +6,7 @@ It assumes no prior conversation context — everything needed is here or in
 
 ## Where the project stands
 
-Two passes have landed:
+Three passes have landed:
 
 1. **Hardening pass** (`claude/code-review-improvements-1inwwx`): the borrow
    lifecycle works end-to-end, permissions are enforced on deep links, dates
@@ -14,7 +14,10 @@ Two passes have landed:
    to today, and a navbar **user switcher** lets you experience the app as any
    mock user.
 2. **Feature pass** (`claude/happy-cannon-511acm`): the three features that
-   were planned here are done — see "Shipped" below. 157 tests.
+   were planned here are done — see "Shipped" below.
+3. **Follow-up pass** (`claude/trusting-hypatia-0hwv0k`): overdue reminders,
+   a phone-width navbar, lender feedback on borrower profiles, automatic
+   overdue notices, and a message thread on each request. 222 tests.
 
 ## Conventions (do not regress these)
 
@@ -81,22 +84,51 @@ Two passes have landed:
 - `cancelRequest(requestId)`: borrower cancels pending/approved, lender
   retracts an approval; releases the item and notifies wishlist subscribers.
 
+### Follow-up pass
+- **Overdue reminders.** `isOverdue` / `daysOverdue` (an `active` loan whose
+  `endDate` is before today; due today is not overdue) and the
+  `overdueLentLoans` / `overdueBorrowedLoans` derived stores. The lender's
+  `sendReturnReminder(requestId)` emits a `return-reminder` notification,
+  limited to one per `RETURN_REMINDER_COOLDOWN_DAYS` calendar days
+  (`lastRemindedAt`, `nextReturnReminderDate`), and is refused once the
+  borrower has confirmed the return. `LoanCard` shows "Overdue by N days";
+  the dashboard has an overdue banner and accepts `?tab=` deep links.
+- **Phone navbar.** At 640px and below the primary links are a fixed bottom
+  tab bar; the top bar keeps logo, reset, bell and user switcher.
+  `.main-content` gets bottom padding to clear it.
+- **Lender feedback on profiles.** `/profile/[id]` lists `borrowerRating` /
+  `borrowerReview` entries under "What lenders say"
+  (`getBorrowerFeedback`). Visibility is `canViewBorrowerFeedback`: the
+  profile owner, their friends, and lenders with a pending/approved/active
+  request from them. Everyone else sees no section.
+
+- **Overdue polish.** `sortOverdueFirst` puts overdue loans at the top of
+  the Lending and Borrowing tabs. `appStore.notifyOverdueLoans()` is a sweep
+  (run from the layout on mount and on `visibilitychange`) that tells both
+  people once per loan, tracked by `overdueNotifiedAt`: `return-reminder`
+  to the borrower, `loan-overdue` to the lender. It looks at every request
+  (state is shared by all mock users) and writes nothing when idle.
+- **Request messages.** `BorrowRequest.messages` (`RequestMessage[]`, read
+  with `?? []`) and `sendRequestMessage(requestId, text)`: borrower or lender
+  only, while pending/approved/active, trimmed, at most
+  `REQUEST_MESSAGE_MAX_LENGTH`. Notifies the other party with
+  `request-message`, which deep-links to the tab where they see the request.
+  `RequestThread.svelte` renders the thread (the original `message` is its
+  opening entry) on every dashboard request and loan card, collapsed behind
+  "Messages (n)".
+
 ## Next ideas (not started)
 
-1. **Navbar overflow on phones.** At 390px the nav bar is ~460px wide (the
-   icon row plus reset/bell/avatar). Collapse into a menu or hide the reset
-   button below a breakpoint. Pre-existing; `src/routes/+layout.svelte`.
-2. **Overdue nudges.** `return-reminder` exists as a notification type but
-   nothing emits it. A derived "overdue loans" store could power a dashboard
-   banner, and the lender could send a one-tap reminder (mirror `nudgeRequest`
-   with its cooldown).
-3. **Borrower profile shows lender feedback.** `borrowerReview` is stored but
-   only the rating surfaces (via `User.rating`). Show the lender's notes on the
-   borrower's profile, visible to the borrower and to lenders considering a
-   request.
-4. **Request-level chat.** Requests carry a single `message`. A small thread
-   (`messages: { fromUserId, text, at }[]` on `BorrowRequest`) would let the
-   two parties agree on pickup details without leaving the app.
-5. **Route tests.** Store coverage is thorough; the routes are only smoke
-   tested manually. `@testing-library/svelte` + the writable `page` mock in
-   `src/test/mocks/stores.ts` make item-page and dashboard tests feasible.
+1. **Route tests.** Store and component coverage is thorough; the routes are
+   only checked by hand in a browser (overdue banner, `?tab=` deep links,
+   thread toggles, profile feedback visibility). `@testing-library/svelte` +
+   the writable `page` mock in `src/test/mocks/stores.ts` make item-page,
+   dashboard and profile tests feasible.
+2. **Unread messages.** A thread only signals new messages through the
+   notification; the "Messages (n)" toggle has no unread marker.
+3. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
+   bottom toasts) must clear the phone tab bar.
+4. **A real backend.** Everything is one browser's localStorage, so other
+   users are simulated. Accounts and a server are the step from prototype to
+   something neighbours can use; messages and notifications are the parts
+   that would change most.

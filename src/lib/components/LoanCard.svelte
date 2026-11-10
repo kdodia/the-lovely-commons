@@ -1,8 +1,16 @@
 <script lang="ts">
   import type { BorrowRequest } from '$lib/types';
-  import { appStore, hasConfirmed } from '$lib/store';
-  import { formatDisplayDate, todayLocalISO } from '$lib/dates';
+  import {
+    appStore,
+    daysOverdue,
+    hasConfirmed,
+    isOverdue,
+    nextReturnReminderDate
+  } from '$lib/store';
+  import { formatDisplayDate, toLocalISODate, todayLocalISO } from '$lib/dates';
+  import { DATE_FORMAT_OPTIONS } from '$lib/constants';
   import FallbackImage from './FallbackImage.svelte';
+  import RequestThread from './RequestThread.svelte';
 
   interface Props {
     request: BorrowRequest;
@@ -11,9 +19,14 @@
     onConfirmPickup?: (requestId: string) => void;
     onConfirmReturn?: (requestId: string) => void;
     onCancel?: (requestId: string) => void;
+    /** Lender only: ask the borrower to bring back an overdue item. */
+    onSendReminder?: (requestId: string) => void;
+    /** Add to the request's message thread; see RequestThread. */
+    onSendMessage?: (requestId: string, text: string) => boolean;
   }
 
-  let { request, perspective, onConfirmPickup, onConfirmReturn, onCancel }: Props = $props();
+  let { request, perspective, onConfirmPickup, onConfirmReturn, onCancel, onSendReminder, onSendMessage }: Props =
+    $props();
 
   let item = $derived($appStore.items.find((i) => i.id === request.itemId));
   let otherUserId = $derived(perspective === 'lender' ? request.borrowerId : request.lenderId);
@@ -23,8 +36,21 @@
   let step = $derived<'pickup' | 'return'>(request.status === 'approved' ? 'pickup' : 'return');
   let iConfirmed = $derived(hasConfirmed(request, step, me));
   let theyConfirmed = $derived(hasConfirmed(request, step, otherUserId));
-  let overdue = $derived(request.status === 'active' && request.endDate < todayLocalISO());
+  let today = $derived(todayLocalISO());
+  let overdue = $derived(isOverdue(request, today));
+  let overdueDays = $derived(daysOverdue(request, today));
   let canCancel = $derived(request.status === 'approved' && !!onCancel);
+
+  // Reminder cooldown, mirroring the store's check so the button only shows
+  // when sendReturnReminder would accept it.
+  let nextReminderDate = $derived(nextReturnReminderDate(request));
+  let reminderCoolingDown = $derived(nextReminderDate !== null && today < nextReminderDate);
+  let showReminder = $derived(
+    perspective === 'lender' && overdue && !theyConfirmed && !!onSendReminder
+  );
+  let lastRemindedDay = $derived(
+    request.lastRemindedAt ? toLocalISODate(new Date(request.lastRemindedAt)) : null
+  );
 </script>
 
 <div class="loan-card card" data-testid="loan-card">
@@ -56,9 +82,7 @@
       <div class="loan-dates">
         <span aria-hidden="true">📅</span>
         {#if request.status === 'active'}
-          <span class:overdue>
-            Return by {formatDisplayDate(request.endDate)}{overdue ? ' — overdue' : ''}
-          </span>
+          <span class:overdue>Return by {formatDisplayDate(request.endDate)}</span>
         {:else}
           <span>{formatDisplayDate(request.startDate)} - {formatDisplayDate(request.endDate)}</span>
         {/if}
@@ -67,8 +91,24 @@
       <div class="handoff-status" aria-live="polite">
         {#if request.status === 'approved'}
           <span class="badge badge-warning">⏳ Awaiting pickup</span>
+        {:else if overdue}
+          <span class="badge badge-error">
+            <span aria-hidden="true">⚠️</span>
+            Overdue by {overdueDays} {overdueDays === 1 ? 'day' : 'days'}
+          </span>
         {:else}
           <span class="badge badge-success">🔄 On loan</span>
+        {/if}
+        {#if overdue && perspective === 'borrower' && !iConfirmed}
+          <span class="handoff-note overdue-note">
+            This was due back {formatDisplayDate(request.endDate, DATE_FORMAT_OPTIONS.short)} — please
+            return it to {otherUser?.name ?? 'the lender'} as soon as you can.
+          </span>
+        {:else if showReminder && reminderCoolingDown && lastRemindedDay && nextReminderDate}
+          <span class="handoff-note waiting">
+            ✓ Reminder sent {formatDisplayDate(lastRemindedDay, DATE_FORMAT_OPTIONS.short)} — you can
+            send another on {formatDisplayDate(nextReminderDate, DATE_FORMAT_OPTIONS.short)}
+          </span>
         {/if}
         {#if iConfirmed}
           <span class="handoff-note waiting">
@@ -80,6 +120,8 @@
           </span>
         {/if}
       </div>
+
+      <RequestThread {request} onSend={onSendMessage} />
     </div>
   </div>
 
@@ -91,6 +133,11 @@
     {:else if request.status === 'active' && !iConfirmed && onConfirmReturn}
       <button class="btn btn-primary" onclick={() => onConfirmReturn(request.id)}>
         Confirm Return
+      </button>
+    {/if}
+    {#if showReminder && !reminderCoolingDown && onSendReminder}
+      <button class="btn btn-secondary" onclick={() => onSendReminder(request.id)}>
+        <span aria-hidden="true">⏰</span> Send reminder
       </button>
     {/if}
     {#if canCancel && onCancel}
@@ -227,6 +274,12 @@
   .handoff-note.ready {
     color: var(--primary);
     background-color: rgba(16, 185, 129, 0.1);
+    font-weight: 500;
+  }
+
+  .handoff-note.overdue-note {
+    color: var(--error);
+    background-color: rgba(239, 68, 68, 0.1);
     font-weight: 500;
   }
 

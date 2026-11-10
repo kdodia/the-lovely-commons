@@ -39,6 +39,15 @@ export function startOfLocalDay(date: Date = new Date()): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+/**
+ * Whole calendar days from one 'YYYY-MM-DD' date to another (negative when
+ * `to` is earlier). Rounded so a DST change in between doesn't lose a day.
+ */
+export function daysBetween(from: string, to: string): number {
+  const ms = parseLocalDate(to).getTime() - parseLocalDate(from).getTime();
+  return Math.round(ms / (1000 * 60 * 60 * 24));
+}
+
 /** Format a stored 'YYYY-MM-DD' string for display without a UTC shift. */
 export function formatDisplayDate(
   dateStr: string,

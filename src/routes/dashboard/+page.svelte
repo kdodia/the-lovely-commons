@@ -5,24 +5,51 @@
     outgoingRequests,
     approvedLoans,
     activeLoans,
-    borrowedByMe
+    borrowedByMe,
+    overdueLentLoans,
+    overdueBorrowedLoans,
+    sortOverdueFirst
   } from '$lib/store';
+  import { page } from '$app/stores';
   import Toast from '$lib/components/Toast.svelte';
   import LoanCard from '$lib/components/LoanCard.svelte';
+  import RequestThread from '$lib/components/RequestThread.svelte';
   import { MAX_RATING, MIN_RATING, DEFAULT_RATING } from '$lib/constants';
   import { formatDisplayDate } from '$lib/dates';
   import { useToast } from '$lib/useToast.svelte';
   import type { ItemCondition } from '$lib/types';
 
-  type Tab = 'incoming' | 'outgoing' | 'lending' | 'borrowing';
+  const TABS = ['incoming', 'outgoing', 'lending', 'borrowing'] as const;
+  type Tab = (typeof TABS)[number];
+
+  // Notifications can deep-link to a tab, e.g. /dashboard?tab=borrowing
+  function tabFromUrl(url: URL): Tab | null {
+    const tab = url.searchParams.get('tab');
+    return TABS.find((t) => t === tab) ?? null;
+  }
+
   let activeTab = $state<Tab>('incoming');
   const toaster = useToast();
 
+  $effect(() => {
+    const tab = tabFromUrl($page.url);
+    if (tab) activeTab = tab;
+  });
+
+  /** "1 item you lent is overdue" / "2 items you borrowed are overdue" */
+  function overdueSummary(count: number, side: 'lent' | 'borrowed'): string {
+    return count === 1
+      ? `1 item you ${side} is overdue`
+      : `${count} items you ${side} are overdue`;
+  }
+
   let lendingCount = $derived($approvedLoans.length + $activeLoans.length);
   // Approved-then-active ordering keeps "pick up soon" above "on loan".
-  let lendingLoans = $derived([...$approvedLoans, ...$activeLoans]);
+  let lendingLoans = $derived(sortOverdueFirst([...$approvedLoans, ...$activeLoans]));
   let borrowingLoans = $derived(
-    [...$borrowedByMe].sort((a, b) => (a.status === b.status ? 0 : a.status === 'approved' ? -1 : 1))
+    sortOverdueFirst(
+      [...$borrowedByMe].sort((a, b) => (a.status === b.status ? 0 : a.status === 'approved' ? -1 : 1))
+    )
   );
 
   // Return modal state (lender side: rates the borrower, records condition)
@@ -82,6 +109,27 @@
     } else {
       toaster.showToast(result.error, 'error');
     }
+  }
+
+  function sendReminder(requestId: string) {
+    const result = appStore.sendReturnReminder(requestId);
+    if (!result.ok) {
+      toaster.showToast(result.error, 'error');
+      return;
+    }
+    const loan = $appStore.borrowRequests.find((r) => r.id === requestId);
+    const borrower = $appStore.users.find((u) => u.id === loan?.borrowerId);
+    toaster.showToast(`Reminder sent to ${borrower?.name ?? 'the borrower'}`, 'success');
+  }
+
+  // Which request threads are expanded, so the incoming card can drop its
+  // quote of the opening message while the thread shows it.
+  let openThreads = $state<Record<string, boolean>>({});
+
+  function sendMessage(requestId: string, text: string): boolean {
+    const result = appStore.sendRequestMessage(requestId, text);
+    if (!result.ok) toaster.showToast(result.error, 'error');
+    return result.ok;
   }
 
   function confirmPickup(requestId: string) {
@@ -199,6 +247,24 @@
       </div>
     </header>
 
+    {#if $overdueLentLoans.length > 0 || $overdueBorrowedLoans.length > 0}
+      <div class="overdue-banner" role="status">
+        <span class="overdue-banner-icon" aria-hidden="true">⏰</span>
+        <div class="overdue-banner-links">
+          {#if $overdueLentLoans.length > 0}
+            <button class="overdue-banner-link" onclick={() => (activeTab = 'lending')}>
+              {overdueSummary($overdueLentLoans.length, 'lent')}
+            </button>
+          {/if}
+          {#if $overdueBorrowedLoans.length > 0}
+            <button class="overdue-banner-link" onclick={() => (activeTab = 'borrowing')}>
+              {overdueSummary($overdueBorrowedLoans.length, 'borrowed')}
+            </button>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
     <div class="dashboard-tabs" role="tablist" aria-label="Dashboard sections">
       <button
         role="tab"
@@ -305,9 +371,13 @@
                         >{formatDisplayDate(request.startDate)} - {formatDisplayDate(request.endDate)}</span
                       >
                     </div>
-                    {#if request.message}
+                    {#if request.message && !openThreads[request.id]}
                       <p class="request-message">"{request.message}"</p>
                     {/if}
+                    <RequestThread {request} onSend={sendMessage} bind:open={
+                        () => openThreads[request.id] ?? false,
+                        (open) => (openThreads[request.id] = open)
+                      } />
                   </div>
                 </div>
                 <div class="request-actions">
@@ -371,6 +441,7 @@
                         <span class="badge badge-error">✗ Declined</span>
                       {/if}
                     </div>
+                    <RequestThread {request} onSend={sendMessage} />
                   </div>
                 </div>
                 {#if request.status === 'pending'}
@@ -410,6 +481,8 @@
                 onConfirmPickup={confirmPickup}
                 onConfirmReturn={openReturnModal}
                 onCancel={cancelRequest}
+                onSendReminder={sendReminder}
+                onSendMessage={sendMessage}
               />
             {/each}
           {/if}
@@ -434,6 +507,7 @@
                 onConfirmPickup={confirmPickup}
                 onConfirmReturn={confirmReturnAsBorrower}
                 onCancel={cancelRequest}
+                onSendMessage={sendMessage}
               />
             {/each}
           {/if}
@@ -572,6 +646,44 @@
     margin: 0;
   }
 
+  .overdue-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--error);
+    border-left-width: 4px;
+    border-radius: var(--radius);
+    background-color: rgba(239, 68, 68, 0.08);
+  }
+
+  .overdue-banner-icon {
+    font-size: 1.25rem;
+  }
+
+  .overdue-banner-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.25rem;
+  }
+
+  .overdue-banner-link {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--error);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .overdue-banner-link:hover {
+    text-decoration: none;
+  }
+
   .dashboard-tabs {
     display: flex;
     gap: 0.5rem;
@@ -644,6 +756,7 @@
     display: flex;
     gap: 1.5rem;
     flex: 1;
+    min-width: 0;
   }
 
   .request-item-link {
@@ -670,6 +783,7 @@
     flex-direction: column;
     gap: 0.75rem;
     flex: 1;
+    min-width: 0;
   }
 
   .request-title-link {
@@ -744,6 +858,7 @@
     background-color: var(--surface);
     border-radius: var(--radius);
     border-left: 3px solid var(--primary);
+    overflow-wrap: anywhere;
   }
 
   .request-actions {

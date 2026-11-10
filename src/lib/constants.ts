@@ -5,6 +5,7 @@
 
 // Time-related constants
 export const NUDGE_DELAY_DAYS = 3; // Days to wait before allowing nudge
+export const RETURN_REMINDER_COOLDOWN_DAYS = 2; // Days between overdue-return reminders
 export const CALENDAR_PREVIEW_DAYS = 90; // Number of days to show in calendar
 export const TOAST_DURATION_MS = 3000; // Duration to show toast notifications
 
@@ -13,6 +14,8 @@ export const DESCRIPTION_PREVIEW_LENGTH = 80; // Characters to show in item desc
 export const MAX_RATING = 5; // Maximum rating value
 export const MIN_RATING = 1; // Minimum rating value
 export const DEFAULT_RATING = 5; // Default rating for returns
+export const REQUEST_MESSAGE_MAX_LENGTH = 500; // Characters allowed in one request-thread message
+export const REQUEST_MESSAGE_PREVIEW_LENGTH = 60; // Characters of a message quoted in its notification
 
 // Date formats
 export const DATE_FORMAT_OPTIONS = {

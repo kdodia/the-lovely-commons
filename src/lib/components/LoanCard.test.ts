@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import LoanCard from './LoanCard.svelte';
 import { appStore } from '$lib/store';
@@ -128,10 +128,105 @@ describe('LoanCard', () => {
 			}
 		});
 
-		expect(screen.getByText(/overdue/)).toBeInTheDocument();
+		expect(screen.getByText(/Overdue by/)).toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: /Cancel/ })).not.toBeInTheDocument();
 		await fireEvent.click(screen.getByRole('button', { name: 'Confirm Return' }));
 		expect(onConfirmReturn).toHaveBeenCalledWith('req1');
+	});
+
+	describe('overdue loans', () => {
+		// Today is Jan 15 2030; request() ends Jan 12.
+		beforeEach(() => {
+			vi.useFakeTimers({ toFake: ['Date'] });
+			vi.setSystemTime(new Date(2030, 0, 15, 12, 0, 0));
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it('shows how late the item is and offers the lender a reminder', async () => {
+			const onSendReminder = vi.fn();
+			render(LoanCard, {
+				props: { request: request({ status: 'active' }), perspective: 'lender', onSendReminder }
+			});
+
+			expect(screen.getByText('Overdue by 3 days')).toBeInTheDocument();
+			expect(screen.queryByText('On loan', { exact: false })).not.toBeInTheDocument();
+			await fireEvent.click(screen.getByRole('button', { name: /Send reminder/ }));
+			expect(onSendReminder).toHaveBeenCalledWith('req1');
+		});
+
+		it('uses the singular for one day', () => {
+			render(LoanCard, {
+				props: {
+					request: request({ status: 'active', endDate: '2030-01-14' }),
+					perspective: 'lender',
+					onSendReminder: vi.fn()
+				}
+			});
+			expect(screen.getByText('Overdue by 1 day')).toBeInTheDocument();
+		});
+
+		it('is not overdue on the due date itself', () => {
+			render(LoanCard, {
+				props: {
+					request: request({ status: 'active', endDate: '2030-01-15' }),
+					perspective: 'lender',
+					onSendReminder: vi.fn()
+				}
+			});
+			expect(screen.getByText('On loan', { exact: false })).toBeInTheDocument();
+			expect(screen.queryByText(/Overdue/)).not.toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: /Send reminder/ })).not.toBeInTheDocument();
+		});
+
+		it('replaces the reminder button with a note during the cooldown', () => {
+			render(LoanCard, {
+				props: {
+					request: request({
+						status: 'active',
+						lastRemindedAt: new Date(2030, 0, 14, 9, 0, 0).toISOString()
+					}),
+					perspective: 'lender',
+					onSendReminder: vi.fn()
+				}
+			});
+
+			expect(screen.queryByRole('button', { name: /Send reminder/ })).not.toBeInTheDocument();
+			expect(screen.getByText(/Reminder sent Jan 14 — you can\s+send another on Jan 16/)).toBeInTheDocument();
+		});
+
+		it('offers the reminder again once the cooldown has passed', () => {
+			render(LoanCard, {
+				props: {
+					request: request({
+						status: 'active',
+						lastRemindedAt: new Date(2030, 0, 13, 9, 0, 0).toISOString()
+					}),
+					perspective: 'lender',
+					onSendReminder: vi.fn()
+				}
+			});
+			expect(screen.getByRole('button', { name: /Send reminder/ })).toBeInTheDocument();
+		});
+
+		it('asks the borrower to return it, without a reminder button', () => {
+			appStore.replaceState(baseState({ currentUserId: 'borrower' }));
+			render(LoanCard, {
+				props: {
+					request: request({ status: 'active' }),
+					perspective: 'borrower',
+					onConfirmReturn: vi.fn(),
+					onSendReminder: vi.fn()
+				}
+			});
+
+			expect(screen.getByText('Overdue by 3 days')).toBeInTheDocument();
+			expect(screen.getByText(/please\s+return it to Lena Lender/)).toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: /Send reminder/ })).not.toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'Confirm Return' })).toBeInTheDocument();
+		});
 	});
 
 	it('only offers cancellation while the loan is still awaiting pickup', () => {
