@@ -5,6 +5,7 @@
   import FriendPicker from '$lib/components/FriendPicker.svelte';
   import type { Item, PermissionLevel } from '$lib/types';
   import { useToast } from '$lib/useToast.svelte';
+  import PageHeader from '$lib/components/PageHeader.svelte';
 
   let name = $state('');
   let description = $state('');
@@ -78,12 +79,7 @@
 
 <div class="add-item-page fade-in">
   <div class="container">
-    <header class="page-header">
-      <div>
-        <h1 class="page-title">Add New Item</h1>
-        <p class="page-subtitle">Share something with your community</p>
-      </div>
-    </header>
+    <PageHeader title="Add New Item" subtitle="Share something with your community" />
 
     <div class="form-card card">
       <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
@@ -252,27 +248,6 @@
 {/if}
 
 <style>
-  .page-header {
-    margin-bottom: 2rem;
-  }
-
-  .page-title {
-    font-size: 2rem;
-    font-weight: 700;
-    margin: 0 0 0.5rem 0;
-  }
-
-  .page-subtitle {
-    font-size: 1rem;
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  .form-card {
-    padding: 2rem;
-    max-width: 800px;
-  }
-
   .form-section {
     margin-bottom: 2.5rem;
     padding-bottom: 2.5rem;
@@ -322,36 +297,10 @@
     gap: 1rem;
   }
 
-  .image-preview {
-    margin-top: 1rem;
-    border-radius: var(--radius);
-    overflow: hidden;
-    max-width: 400px;
-  }
-
-  .image-preview img {
-    width: 100%;
-    height: 200px;
-    object-fit: cover;
-    display: block;
-  }
-
   .radio-group {
     display: flex;
     gap: 1rem;
     flex-wrap: wrap;
-  }
-
-  .radio-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-  }
-
-  .radio-label input[type='radio'] {
-    width: auto;
-    cursor: pointer;
   }
 
   .radio-label .badge {
@@ -363,58 +312,6 @@
     background-color: var(--primary);
     color: white;
     border-color: var(--primary);
-  }
-
-  .radio-group-vertical {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .radio-label-vertical {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 1rem;
-    border: 2px solid var(--border);
-    border-radius: var(--radius);
-    cursor: pointer;
-    transition: all var(--transition);
-  }
-
-  .radio-label-vertical:hover {
-    border-color: var(--primary);
-    background-color: rgba(16, 185, 129, 0.05);
-  }
-
-  .radio-label-vertical input[type='radio'] {
-    width: auto;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-
-  .radio-label-vertical input[type='radio']:checked {
-    accent-color: var(--primary);
-  }
-
-  .radio-label-vertical input[type='radio']:checked ~ .permission-info {
-    color: var(--primary);
-  }
-
-  .permission-info {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .permission-title {
-    font-weight: 600;
-    font-size: 0.9375rem;
-  }
-
-  .permission-desc {
-    font-size: 0.8125rem;
-    color: var(--text-secondary);
   }
 
   .form-actions {
@@ -429,10 +326,6 @@
   }
 
   @media (max-width: 768px) {
-    .form-card {
-      padding: 1.5rem;
-    }
-
     .form-row {
       grid-template-columns: 1fr;
     }
@@ -444,5 +337,25 @@
     .radio-group {
       flex-direction: column;
     }
+  }
+
+  /* These stay in the page so they out-rank `.form-group input` above */
+  .radio-label input[type='radio'] {
+    width: auto;
+    cursor: pointer;
+  }
+
+  .radio-label-vertical input[type='radio'] {
+    width: auto;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .radio-label-vertical input[type='radio']:checked {
+    accent-color: var(--primary);
+  }
+
+  .radio-label-vertical input[type='radio']:checked ~ .permission-info {
+    color: var(--primary);
   }
 </style>

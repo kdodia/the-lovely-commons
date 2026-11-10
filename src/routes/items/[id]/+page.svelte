@@ -2,7 +2,11 @@
   import { page } from '$app/stores';
   import { appStore, canUserViewItem, createId, getCategoryPath, getPermissionLevelInfo, pendingItemReviews } from '$lib/store';
   import Toast from '$lib/components/Toast.svelte';
+  import Avatar from '$lib/components/Avatar.svelte';
+  import StarRating from '$lib/components/StarRating.svelte';
+  import RatingScore from '$lib/components/RatingScore.svelte';
   import DateRangeCalendar from '$lib/components/DateRangeCalendar.svelte';
+  import StarRatingInput from '$lib/components/StarRatingInput.svelte';
   import type { BorrowRequest } from '$lib/types';
   import { DEFAULT_RATING, MAX_RATING, MIN_RATING, NUDGE_DELAY_DAYS } from '$lib/constants';
   import { addDays, formatDisplayDate, startOfLocalDay, toLocalISODate } from '$lib/dates';
@@ -52,7 +56,6 @@
 
   // Inline review form state
   let reviewRating = $state(DEFAULT_RATING);
-  let reviewHoveredStar = $state(0);
   let reviewText = $state('');
 
   function submitReview() {
@@ -289,12 +292,12 @@
             </div>
 
             <div class="lender-card">
-              <img src={lender?.profilePic} alt={lender?.name} class="lender-avatar-large" />
+              <Avatar src={lender?.profilePic} alt={lender?.name ?? ""} size="4rem" border="3px" />
               <div class="lender-info">
                 <span class="lender-label">Lent by</span>
                 <a href="/profile/{lender?.id}" class="lender-name-large">{lender?.name}</a>
                 <div class="lender-stats">
-                  <span><span aria-hidden="true">⭐</span> {lender?.rating.toFixed(1)}</span>
+                  <span><RatingScore value={lender?.rating} /></span>
                   <span>•</span>
                   <span>{lender?.totalLends} items lent</span>
                 </div>
@@ -529,23 +532,7 @@
               <div class="form-group">
                 <!-- svelte-ignore a11y_label_has_associated_control - Label is associated with radiogroup via aria-labelledby -->
                 <label id="item-rating-label">Rating</label>
-                <div class="star-rating" role="radiogroup" aria-labelledby="item-rating-label">
-                  {#each [1, 2, 3, 4, 5] as star}
-                    <button
-                      type="button"
-                      class="star"
-                      class:filled={star <= (reviewHoveredStar || reviewRating)}
-                      role="radio"
-                      aria-label="Rate {star} out of 5 stars"
-                      aria-checked={star === reviewRating}
-                      onclick={() => (reviewRating = star)}
-                      onmouseenter={() => (reviewHoveredStar = star)}
-                      onmouseleave={() => (reviewHoveredStar = 0)}
-                    >
-                      <span aria-hidden="true">⭐</span>
-                    </button>
-                  {/each}
-                </div>
+                <StarRatingInput bind:value={reviewRating} labelledby="item-rating-label" />
               </div>
               <div class="form-group">
                 <label for="item-review">Review (optional)</label>
@@ -568,15 +555,11 @@
                   {@const reviewer = $appStore.users.find((u) => u.id === hist.reviewerId)}
                   <div class="review-item">
                     <div class="review-header">
-                      <img src={reviewer?.profilePic} alt={reviewer?.name} class="reviewer-avatar" />
+                      <Avatar src={reviewer?.profilePic} alt={reviewer?.name ?? ""} size="2.5rem" />
                       <div>
                         <div class="reviewer-name">{reviewer?.name ?? 'A borrower'}</div>
                         <div class="review-context">borrowed {formatDisplayDate(hist.endDate, { month: 'short', year: 'numeric' })}</div>
-                        <div class="review-rating" aria-label="{hist.rating ?? 0} out of {MAX_RATING} stars">
-                          {#each Array(hist.rating || 0) as _}
-                            <span aria-hidden="true">⭐</span>
-                          {/each}
-                        </div>
+                        <StarRating value={hist.rating} size="sm" label="{hist.rating ?? 0} out of {MAX_RATING} stars" />
                       </div>
                     </div>
                     {#if hist.review}
@@ -831,14 +814,6 @@
     background-color: var(--surface);
     border-radius: var(--radius-lg);
     margin-bottom: 1.5rem;
-  }
-
-  .lender-avatar-large {
-    width: 4rem;
-    height: 4rem;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 3px solid var(--primary);
   }
 
   .permission-card {
@@ -1186,13 +1161,6 @@
     margin-bottom: 0.75rem;
   }
 
-  .reviewer-avatar {
-    width: 2.5rem;
-    height: 2.5rem;
-    border-radius: 50%;
-    object-fit: cover;
-  }
-
   .reviewer-name {
     font-weight: 600;
     font-size: 0.875rem;
@@ -1203,20 +1171,11 @@
     color: var(--text-muted);
   }
 
-  .review-rating {
-    font-size: 0.75rem;
-  }
-
   .review-text {
     font-size: 0.875rem;
     line-height: 1.6;
     color: var(--text-secondary);
     margin: 0 0 0.5rem 0;
-  }
-
-  .error-state {
-    text-align: center;
-    padding: 4rem 2rem;
   }
 
   @media (max-width: 768px) {
@@ -1273,28 +1232,5 @@
   .review-form-section textarea:focus {
     outline: none;
     border-color: var(--primary);
-  }
-
-  .star-rating {
-    display: flex;
-    gap: 0.375rem;
-  }
-
-  .star {
-    background: none;
-    border: none;
-    font-size: 1.75rem;
-    cursor: pointer;
-    padding: 0;
-    opacity: 0.3;
-    transition: transform var(--transition), opacity var(--transition);
-  }
-
-  .star:hover {
-    transform: scale(1.15);
-  }
-
-  .star.filled {
-    opacity: 1;
   }
 </style>

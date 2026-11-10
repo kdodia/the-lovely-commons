@@ -11,6 +11,7 @@
   import { DATE_FORMAT_OPTIONS } from '$lib/constants';
   import FallbackImage from './FallbackImage.svelte';
   import RequestThread from './RequestThread.svelte';
+  import UserChip from './UserChip.svelte';
 
   interface Props {
     request: BorrowRequest;
@@ -72,12 +73,7 @@
             {request.status === 'approved' ? 'Pick up from' : 'Borrowed from'}
           {/if}
         </span>
-        <a href="/profile/{otherUserId}" class="user-link">
-          <span class="user-avatar">
-            <FallbackImage src={otherUser?.profilePic} alt={otherUser?.name ?? 'User'} fallbackType="avatar" />
-          </span>
-          <span class="user-name">{otherUser?.name ?? 'Unknown user'}</span>
-        </a>
+        <UserChip userId={otherUserId} name={otherUser?.name ?? 'Unknown user'} src={otherUser?.profilePic} fallback />
       </div>
       <div class="loan-dates">
         <span aria-hidden="true">📅</span>
@@ -213,39 +209,6 @@
     font-size: 0.875rem;
     color: var(--text-secondary);
     flex-wrap: wrap;
-  }
-
-  .user-link {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    text-decoration: none;
-    color: inherit;
-    border-radius: var(--radius);
-    padding: 0.25rem 0.5rem;
-    margin: -0.25rem -0.5rem;
-    transition: all var(--transition);
-  }
-
-  .user-link:hover {
-    background-color: rgba(16, 185, 129, 0.1);
-  }
-
-  .user-link:hover .user-name {
-    color: var(--primary);
-  }
-
-  .user-avatar {
-    width: 1.75rem;
-    height: 1.75rem;
-    border-radius: 50%;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-
-  .user-name {
-    font-weight: 500;
-    color: var(--text-primary);
   }
 
   .overdue {

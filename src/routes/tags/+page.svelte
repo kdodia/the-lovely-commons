@@ -1,8 +1,11 @@
 <script lang="ts">
   import { appStore, createId } from '$lib/store';
   import Toast from '$lib/components/Toast.svelte';
+  import Modal from '$lib/components/Modal.svelte';
   import type { Tag } from '$lib/types';
   import { useToast } from '$lib/useToast.svelte';
+  import EmptyState from '$lib/components/EmptyState.svelte';
+  import PageHeader from '$lib/components/PageHeader.svelte';
 
   let showCreateForm = $state(false);
   let newTagName = $state('');
@@ -53,7 +56,6 @@
   let editedName = $state('');
   let renameInput = $state<HTMLInputElement | undefined>();
   let showDeleteConfirm = $state(false);
-  let deleteModalElement = $state<HTMLDivElement | undefined>();
 
   function startRename() {
     if (!selectedTag) return;
@@ -98,16 +100,8 @@
     toaster.showToast('Tag deleted', 'success');
   }
 
-  function handleDeleteModalKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') showDeleteConfirm = false;
-  }
-
   $effect(() => {
     if (editingName && renameInput) renameInput.focus();
-  });
-
-  $effect(() => {
-    if (showDeleteConfirm && deleteModalElement) deleteModalElement.focus();
   });
 
   // Leaving edit mode when switching tags
@@ -131,16 +125,12 @@
 
 <div class="tags-page fade-in">
   <div class="container">
-    <header class="page-header">
-      <div>
-        <h1 class="page-title">Tag Collections</h1>
-        <p class="page-subtitle">Organize your items into custom collections</p>
-      </div>
+    <PageHeader title="Tag Collections" subtitle="Organize your items into custom collections">
       <button class="btn btn-primary" onclick={() => (showCreateForm = !showCreateForm)}>
         <span>+</span>
         <span>Create Tag</span>
       </button>
-    </header>
+    </PageHeader>
 
     {#if showCreateForm}
       <div class="create-form card">
@@ -273,11 +263,7 @@
             </div>
           </div>
         {:else}
-          <div class="no-selection">
-            <span class="empty-icon" aria-hidden="true">🏷️</span>
-            <h3>Select a tag to view items</h3>
-            <p>Choose a tag from the sidebar to manage its items</p>
-          </div>
+          <EmptyState icon="🏷️" title="Select a tag to view items" description="Choose a tag from the sidebar to manage its items" />
         {/if}
       </div>
     </div>
@@ -285,17 +271,13 @@
 </div>
 
 {#if showDeleteConfirm && selectedTag}
-  <!-- svelte-ignore a11y_click_events_have_key_events - Modal overlay has onkeydown handler for Escape key -->
-  <div class="modal-overlay" onclick={() => (showDeleteConfirm = false)} onkeydown={handleDeleteModalKeydown} role="presentation">
-    <div class="modal-content" bind:this={deleteModalElement} onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="delete-tag-title" tabindex="-1">
-      <h2 id="delete-tag-title">Delete "{selectedTag.name}"?</h2>
-      <p>The collection goes away; the {selectedTag.itemIds.length} {selectedTag.itemIds.length === 1 ? 'item' : 'items'} in it stay in your library.</p>
-      <div class="modal-actions">
-        <button class="btn btn-error" onclick={confirmDelete}>Delete Tag</button>
-        <button class="btn btn-secondary" onclick={() => (showDeleteConfirm = false)}>Cancel</button>
-      </div>
-    </div>
-  </div>
+  <Modal title={`Delete "${selectedTag.name}"?`} size="sm" onClose={() => (showDeleteConfirm = false)}>
+    <p>The collection goes away; the {selectedTag.itemIds.length} {selectedTag.itemIds.length === 1 ? 'item' : 'items'} in it stay in your library.</p>
+    {#snippet actions()}
+      <button class="btn btn-error" onclick={confirmDelete}>Delete Tag</button>
+      <button class="btn btn-secondary" onclick={() => (showDeleteConfirm = false)}>Cancel</button>
+    {/snippet}
+  </Modal>
 {/if}
 
 {#if toaster.toast}
@@ -355,62 +337,6 @@
   .btn-error {
     background-color: var(--error);
     color: white;
-  }
-
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 1rem;
-  }
-
-  .modal-content {
-    background: var(--background);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
-    max-width: 440px;
-    width: 100%;
-    padding: 2rem;
-  }
-
-  .modal-content h2 {
-    margin: 0 0 0.75rem 0;
-    font-size: 1.375rem;
-  }
-
-  .modal-content p {
-    margin: 0 0 1.5rem 0;
-    color: var(--text-secondary);
-  }
-
-  .modal-actions {
-    display: flex;
-    gap: 0.75rem;
-    justify-content: flex-end;
-  }
-
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-    gap: 1rem;
-  }
-
-  .page-title {
-    font-size: 2rem;
-    font-weight: 700;
-    margin: 0 0 0.5rem 0;
-  }
-
-  .page-subtitle {
-    font-size: 1rem;
-    color: var(--text-secondary);
-    margin: 0;
   }
 
   .create-form {
@@ -620,28 +546,6 @@
     padding: 2rem 1rem;
     text-align: center;
     color: var(--text-secondary);
-  }
-
-  .no-selection {
-    text-align: center;
-    padding: 4rem 2rem;
-  }
-
-  .empty-icon {
-    font-size: 4rem;
-    display: block;
-    margin-bottom: 1rem;
-  }
-
-  .no-selection h3 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin: 0 0 0.5rem 0;
-  }
-
-  .no-selection p {
-    color: var(--text-secondary);
-    margin: 0;
   }
 
   .text-muted {

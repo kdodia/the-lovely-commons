@@ -1,8 +1,14 @@
 <script lang="ts">
   import { appStore, incomingFriendRequests } from '$lib/store';
   import Toast from '$lib/components/Toast.svelte';
+  import RatingScore from '$lib/components/RatingScore.svelte';
+  import Modal from '$lib/components/Modal.svelte';
+  import Avatar from '$lib/components/Avatar.svelte';
   import { useToast } from '$lib/useToast.svelte';
   import type { FriendRequest } from '$lib/types';
+  import EmptyState from '$lib/components/EmptyState.svelte';
+  import PageHeader from '$lib/components/PageHeader.svelte';
+  import Tabs from '$lib/components/Tabs.svelte';
 
   let currentUser = $derived($appStore.users.find((u) => u.id === $appStore.currentUserId));
   const toaster = useToast();
@@ -18,7 +24,6 @@
   let showDeclineModal = $state(false);
   let declineRequestId = $state<string | null>(null);
   let declineMessage = $state('');
-  let declineModalElement = $state<HTMLDivElement | undefined>();
 
   // Get users in each tier
   let closeFriends = $derived(
@@ -103,20 +108,6 @@
     cancelDecline();
   }
 
-  // Handle escape key for modal
-  function handleModalKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      cancelDecline();
-    }
-  }
-
-  // Focus modal when it opens
-  $effect(() => {
-    if (showDeclineModal && declineModalElement) {
-      declineModalElement.focus();
-    }
-  });
-
   function promoteToCloseFriend(friendId: string) {
     if (!currentUser) return;
     appStore.promoteToCloseFriend(currentUser.id, friendId);
@@ -143,12 +134,7 @@
 
 <div class="network-page fade-in">
   <div class="container">
-    <header class="page-header">
-      <div>
-        <h1 class="page-title">My Network</h1>
-        <p class="page-subtitle">Manage your connections and sharing circles</p>
-      </div>
-    </header>
+    <PageHeader title="My Network" subtitle="Manage your connections and sharing circles" />
 
     <div class="stats-grid">
       <div class="stat-card card">
@@ -189,87 +175,34 @@
     </div>
 
     <div class="network-section">
-      <div class="network-tabs">
-        <button
-          class="network-tab"
-          class:active={networkTab === 'close-friends'}
-          onclick={() => (networkTab = 'close-friends')}
-        >
-          <span aria-hidden="true">💚</span>
-          <span>Close Friends</span>
-          {#if closeFriends.length > 0}
-            <span class="tab-badge">{closeFriends.length}</span>
-          {/if}
-        </button>
-
-        <button
-          class="network-tab"
-          class:active={networkTab === 'friends'}
-          onclick={() => (networkTab = 'friends')}
-        >
-          <span aria-hidden="true">👥</span>
-          <span>Friends</span>
-          {#if friends.length > 0}
-            <span class="tab-badge">{friends.length}</span>
-          {/if}
-        </button>
-
-        <button
-          class="network-tab"
-          class:active={networkTab === 'friends-of-friends'}
-          onclick={() => (networkTab = 'friends-of-friends')}
-        >
-          <span aria-hidden="true">🔗</span>
-          <span>Friends of Friends</span>
-          {#if friendsOfFriends.length > 0}
-            <span class="tab-badge">{friendsOfFriends.length}</span>
-          {/if}
-        </button>
-
-        <button
-          class="network-tab"
-          class:active={networkTab === 'neighbors'}
-          onclick={() => (networkTab = 'neighbors')}
-        >
-          <span aria-hidden="true">🏘️</span>
-          <span>Neighbors</span>
-          {#if neighbors.length > 0}
-            <span class="tab-badge">{neighbors.length}</span>
-          {/if}
-        </button>
-
-        <button
-          class="network-tab"
-          class:active={networkTab === 'friend-requests'}
-          onclick={() => (networkTab = 'friend-requests')}
-        >
-          <span aria-hidden="true">📬</span>
-          <span>Friend Requests</span>
-          {#if $incomingFriendRequests.length > 0 || outgoingFriendRequests.length > 0}
-            <span class="tab-badge">{$incomingFriendRequests.length + outgoingFriendRequests.length}</span>
-          {/if}
-        </button>
-      </div>
+      <Tabs
+        iconsOnly
+        label="Network sections"
+        bind:value={networkTab}
+        tabs={[
+          { id: 'close-friends', label: 'Close Friends', icon: '💚', count: closeFriends.length },
+          { id: 'friends', label: 'Friends', icon: '👥', count: friends.length },
+          { id: 'friends-of-friends', label: 'Friends of Friends', icon: '🔗', count: friendsOfFriends.length },
+          { id: 'neighbors', label: 'Neighbors', icon: '🏘️', count: neighbors.length },
+          { id: 'friend-requests', label: 'Friend Requests', icon: '📬', count: $incomingFriendRequests.length + outgoingFriendRequests.length }
+        ]}
+      />
 
       <div class="tab-content">
         {#if networkTab === 'close-friends'}
           <div class="users-grid">
             {#if closeFriends.length === 0}
-              <div class="empty-state">
-                <span class="empty-icon" aria-hidden="true">💚</span>
-                <h3>No close friends yet</h3>
-                <p>Promote friends to your inner circle to share special items with them</p>
-              </div>
+              <EmptyState icon="💚" title="No close friends yet" description="Promote friends to your inner circle to share special items with them" />
             {:else}
               {#each closeFriends as user}
                 <div class="user-card card">
                   <a href="/profile/{user.id}" class="user-card-link">
-                    <img src={user.profilePic} alt={user.name} class="user-avatar" />
+                    <Avatar src={user.profilePic} alt={user.name} size="60px" border="2px" />
                     <div class="user-info">
                       <h3 class="user-name">{user.name}</h3>
                       <p class="user-location">{user.address?.city}</p>
                       <div class="user-stats">
-                        <span><span aria-hidden="true">⭐</span> {user.rating.toFixed(1)}</span>
+                        <span><RatingScore value={user.rating} /></span>
                         <span>•</span>
                         <span>{user.totalLends} lends</span>
                       </div>
@@ -294,21 +227,17 @@
         {:else if networkTab === 'friends'}
           <div class="users-grid">
             {#if friends.length === 0}
-              <div class="empty-state">
-                <span class="empty-icon" aria-hidden="true">👥</span>
-                <h3>No friends yet</h3>
-                <p>Connect with friends-of-friends and neighbors to grow your network</p>
-              </div>
+              <EmptyState icon="👥" title="No friends yet" description="Connect with friends-of-friends and neighbors to grow your network" />
             {:else}
               {#each friends as user}
                 <div class="user-card card">
                   <a href="/profile/{user.id}" class="user-card-link">
-                    <img src={user.profilePic} alt={user.name} class="user-avatar" />
+                    <Avatar src={user.profilePic} alt={user.name} size="60px" border="2px" />
                     <div class="user-info">
                       <h3 class="user-name">{user.name}</h3>
                       <p class="user-location">{user.address?.city}</p>
                       <div class="user-stats">
-                        <span><span aria-hidden="true">⭐</span> {user.rating.toFixed(1)}</span>
+                        <span><RatingScore value={user.rating} /></span>
                         <span>•</span>
                         <span>{user.totalLends} lends</span>
                       </div>
@@ -332,22 +261,18 @@
         {:else if networkTab === 'friends-of-friends'}
           <div class="users-grid">
             {#if friendsOfFriends.length === 0}
-              <div class="empty-state">
-                <span class="empty-icon" aria-hidden="true">🔗</span>
-                <h3>No friends-of-friends</h3>
-                <p>Your friends don't have any other connections yet</p>
-              </div>
+              <EmptyState icon="🔗" title="No friends-of-friends" description="Your friends don't have any other connections yet" />
             {:else}
               {#each friendsOfFriends as user}
                 {@const pendingRequest = getFriendRequestStatus(user.id)}
                 <div class="user-card card">
                   <a href="/profile/{user.id}" class="user-card-link">
-                    <img src={user.profilePic} alt={user.name} class="user-avatar" />
+                    <Avatar src={user.profilePic} alt={user.name} size="60px" border="2px" />
                     <div class="user-info">
                       <h3 class="user-name">{user.name}</h3>
                       <p class="user-location">{user.address?.city}</p>
                       <div class="user-stats">
-                        <span><span aria-hidden="true">⭐</span> {user.rating.toFixed(1)}</span>
+                        <span><RatingScore value={user.rating} /></span>
                         <span>•</span>
                         <span>{user.totalLends} lends</span>
                       </div>
@@ -380,22 +305,18 @@
         {:else if networkTab === 'neighbors'}
           <div class="users-grid">
             {#if neighbors.length === 0}
-              <div class="empty-state">
-                <span class="empty-icon" aria-hidden="true">🏘️</span>
-                <h3>No neighbors found</h3>
-                <p>No other users in {currentUser?.address?.city} yet</p>
-              </div>
+              <EmptyState icon="🏘️" title="No neighbors found" description="No other users in {currentUser?.address?.city} yet" />
             {:else}
               {#each neighbors as user}
                 {@const pendingRequest = getFriendRequestStatus(user.id)}
                 <div class="user-card card">
                   <a href="/profile/{user.id}" class="user-card-link">
-                    <img src={user.profilePic} alt={user.name} class="user-avatar" />
+                    <Avatar src={user.profilePic} alt={user.name} size="60px" border="2px" />
                     <div class="user-info">
                       <h3 class="user-name">{user.name}</h3>
                       <p class="user-location">{user.address?.city}</p>
                       <div class="user-stats">
-                        <span><span aria-hidden="true">⭐</span> {user.rating.toFixed(1)}</span>
+                        <span><RatingScore value={user.rating} /></span>
                         <span>•</span>
                         <span>{user.totalLends} lends</span>
                       </div>
@@ -437,18 +358,14 @@
               </h2>
               <div class="requests-list">
                 {#if $incomingFriendRequests.length === 0}
-                  <div class="empty-state">
-                    <span class="empty-icon" aria-hidden="true">📬</span>
-                    <h3>No incoming requests</h3>
-                    <p>Friend requests from others will appear here</p>
-                  </div>
+                  <EmptyState icon="📬" title="No incoming requests" description="Friend requests from others will appear here" />
                 {:else}
                   {#each $incomingFriendRequests as request}
                     {@const fromUser = $appStore.users.find((u) => u.id === request.fromUserId)}
                     <div class="request-card card">
                       <div class="request-content">
                         <a href="/profile/{fromUser?.id}" class="request-item-link">
-                          <img src={fromUser?.profilePic} alt={fromUser?.name} class="friend-request-avatar-large" />
+                          <Avatar src={fromUser?.profilePic} alt={fromUser?.name ?? ""} size="100px" border="3px" />
                         </a>
                         <div class="request-details">
                           <a href="/profile/{fromUser?.id}" class="request-title-link">
@@ -458,7 +375,7 @@
                           <div class="request-meta">
                             <span><span aria-hidden="true">📍</span> {fromUser?.address?.city}</span>
                             <span>•</span>
-                            <span><span aria-hidden="true">⭐</span> {fromUser?.rating.toFixed(1)}</span>
+                            <span><RatingScore value={fromUser?.rating} /></span>
                             <span>•</span>
                             <span>{fromUser?.totalLends} lends</span>
                           </div>
@@ -491,18 +408,14 @@
               </h2>
               <div class="requests-list">
                 {#if outgoingFriendRequests.length === 0}
-                  <div class="empty-state">
-                    <span class="empty-icon" aria-hidden="true">📮</span>
-                    <h3>No outgoing requests</h3>
-                    <p>Friend requests you've sent will appear here</p>
-                  </div>
+                  <EmptyState icon="📮" title="No outgoing requests" description="Friend requests you've sent will appear here" />
                 {:else}
                   {#each outgoingFriendRequests as request}
                     {@const toUser = $appStore.users.find((u) => u.id === request.toUserId)}
                     <div class="request-card card">
                       <div class="request-content">
                         <a href="/profile/{toUser?.id}" class="request-item-link">
-                          <img src={toUser?.profilePic} alt={toUser?.name} class="friend-request-avatar-large" />
+                          <Avatar src={toUser?.profilePic} alt={toUser?.name ?? ""} size="100px" border="3px" />
                         </a>
                         <div class="request-details">
                           <a href="/profile/{toUser?.id}" class="request-title-link">
@@ -512,7 +425,7 @@
                           <div class="request-meta">
                             <span><span aria-hidden="true">📍</span> {toUser?.address?.city}</span>
                             <span>•</span>
-                            <span><span aria-hidden="true">⭐</span> {toUser?.rating.toFixed(1)}</span>
+                            <span><RatingScore value={toUser?.rating} /></span>
                             <span>•</span>
                             <span>{toUser?.totalLends} lends</span>
                           </div>
@@ -541,25 +454,22 @@
 </div>
 
 {#if showDeclineModal}
-  <!-- svelte-ignore a11y_click_events_have_key_events - Modal overlay has onkeydown handler for Escape key -->
-  <div class="modal-overlay" onclick={cancelDecline} onkeydown={handleModalKeydown} role="presentation">
-    <div class="modal-content" bind:this={declineModalElement} onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="decline-modal-title" tabindex="-1">
-      <h2 id="decline-modal-title">Decline Friend Request</h2>
-      <p class="modal-description">Would you like to include a message? (optional)</p>
-      <div class="form-group">
-        <textarea
-          bind:value={declineMessage}
-          placeholder="Let them know why you're declining..."
-          rows="4"
-          class="decline-textarea"
-        ></textarea>
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-secondary" onclick={cancelDecline}>Cancel</button>
-        <button class="btn btn-error" onclick={confirmDecline}>Decline Request</button>
-      </div>
+  <Modal title="Decline Friend Request" onClose={cancelDecline}>
+    <!-- The title sits closer to this line than in the other dialogs -->
+    <p style="margin-top: -0.5rem">Would you like to include a message? (optional)</p>
+    <div class="form-group">
+      <textarea
+        bind:value={declineMessage}
+        placeholder="Let them know why you're declining..."
+        rows="4"
+        class="decline-textarea"
+      ></textarea>
     </div>
-  </div>
+    {#snippet actions()}
+      <button class="btn btn-secondary" onclick={cancelDecline}>Cancel</button>
+      <button class="btn btn-error" onclick={confirmDecline}>Decline Request</button>
+    {/snippet}
+  </Modal>
 {/if}
 
 {#if toaster.toast}
@@ -567,22 +477,6 @@
 {/if}
 
 <style>
-  .page-header {
-    margin-bottom: 2rem;
-  }
-
-  .page-title {
-    font-size: 2rem;
-    font-weight: 700;
-    margin: 0 0 0.5rem 0;
-  }
-
-  .page-subtitle {
-    font-size: 1rem;
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
   .stats-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -630,50 +524,6 @@
     margin-top: 2rem;
   }
 
-  .network-tabs {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
-    border-bottom: 2px solid var(--border);
-    overflow-x: auto;
-  }
-
-  .network-tab {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 1rem 1.5rem;
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
-    cursor: pointer;
-    font-size: 0.9375rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-    transition: all var(--transition);
-    white-space: nowrap;
-  }
-
-  .network-tab:hover {
-    color: var(--text-primary);
-    background-color: var(--surface);
-  }
-
-  .network-tab.active {
-    color: var(--primary);
-    border-bottom-color: var(--primary);
-  }
-
-  .network-tab .tab-badge {
-    background-color: var(--primary);
-    color: white;
-    padding: 0.125rem 0.5rem;
-    border-radius: 10px;
-    font-size: 0.75rem;
-    font-weight: 600;
-  }
-
   .users-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -692,15 +542,6 @@
     text-decoration: none;
     color: inherit;
     margin-bottom: 1rem;
-  }
-
-  .user-avatar {
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 2px solid var(--primary);
-    flex-shrink: 0;
   }
 
   .user-info {
@@ -746,29 +587,6 @@
     font-size: 0.875rem;
   }
 
-  .empty-state {
-    grid-column: 1 / -1;
-    text-align: center;
-    padding: 4rem 2rem;
-  }
-
-  .empty-icon {
-    font-size: 4rem;
-    display: block;
-    margin-bottom: 1rem;
-  }
-
-  .empty-state h3 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin: 0 0 0.5rem 0;
-  }
-
-  .empty-state p {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
   /* Friend Requests Section */
   .friend-requests-section {
     display: flex;
@@ -801,44 +619,10 @@
     font-weight: 600;
   }
 
-  .requests-list {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .request-card {
-    padding: 1.5rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1.5rem;
-  }
-
   .request-content {
     display: flex;
     gap: 1.5rem;
     flex: 1;
-  }
-
-  .request-item-link {
-    display: block;
-    flex-shrink: 0;
-    transition: opacity var(--transition);
-  }
-
-  .request-item-link:hover {
-    opacity: 0.8;
-  }
-
-  .friend-request-avatar-large {
-    width: 100px;
-    height: 100px;
-    object-fit: cover;
-    border-radius: 50%;
-    flex-shrink: 0;
-    display: block;
-    border: 3px solid var(--primary);
   }
 
   .request-details {
@@ -848,35 +632,11 @@
     flex: 1;
   }
 
-  .request-title-link {
-    text-decoration: none;
-    color: inherit;
-    transition: color var(--transition);
-  }
-
-  .request-title-link:hover {
-    color: var(--primary);
-  }
-
-  .request-title {
-    font-size: 1.25rem;
-    font-weight: 600;
-    margin: 0;
-  }
-
   .request-bio {
     font-size: 0.9375rem;
     color: var(--text-secondary);
     line-height: 1.5;
     margin: 0;
-  }
-
-  .request-meta {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
   }
 
   .request-message {
@@ -903,42 +663,6 @@
   }
 
   /* Modal styles */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    animation: fadeIn 0.2s ease-out;
-  }
-
-  .modal-content {
-    background-color: var(--background);
-    padding: 2rem;
-    border-radius: var(--radius-lg);
-    max-width: 500px;
-    width: 90%;
-    box-shadow: var(--shadow-lg);
-    animation: slideUp 0.2s ease-out;
-  }
-
-  .modal-content h2 {
-    margin: 0 0 0.5rem 0;
-    font-size: 1.5rem;
-    color: var(--text-primary);
-  }
-
-  .modal-description {
-    margin: 0 0 1.5rem 0;
-    color: var(--text-secondary);
-    line-height: 1.5;
-  }
-
   .form-group {
     margin-bottom: 1.5rem;
   }
@@ -961,32 +685,6 @@
     border-color: var(--primary);
   }
 
-  .modal-actions {
-    display: flex;
-    gap: 1rem;
-    justify-content: flex-end;
-  }
-
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
-  }
-
-  @keyframes slideUp {
-    from {
-      transform: translateY(20px);
-      opacity: 0;
-    }
-    to {
-      transform: translateY(0);
-      opacity: 1;
-    }
-  }
-
   @media (max-width: 768px) {
     .stats-grid {
       grid-template-columns: 1fr;
@@ -996,33 +694,12 @@
       grid-template-columns: 1fr;
     }
 
-    .network-tab span:nth-child(2) {
-      display: none;
-    }
-
-    .network-tab {
-      padding: 1rem;
-    }
-
-    .request-card {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
     .request-content {
       flex-direction: column;
     }
 
     .request-actions {
       flex-direction: row;
-    }
-
-    .modal-content {
-      padding: 1.5rem;
-    }
-
-    .modal-actions {
-      flex-direction: column;
     }
   }
 </style>

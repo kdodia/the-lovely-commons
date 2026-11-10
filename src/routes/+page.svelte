@@ -2,6 +2,7 @@
   import { appStore, canUserViewItem } from '$lib/store';
   import ItemCard from '$lib/components/ItemCard.svelte';
   import type { Item } from '$lib/types';
+  import PageHeader from '$lib/components/PageHeader.svelte';
 
   type SortOption = 'popular' | 'rating' | 'recent' | 'alphabetical';
 
@@ -233,12 +234,7 @@
 
 <div class="browse-page fade-in">
   <div class="container">
-    <header class="page-header">
-      <div>
-        <h1 class="page-title">Browse Items</h1>
-        <p class="page-subtitle">Discover what your community is sharing</p>
-      </div>
-    </header>
+    <PageHeader title="Browse Items" subtitle="Discover what your community is sharing" shrinkTitle />
 
     <div class="filters-section">
       <div class="search-bar">
@@ -401,26 +397,6 @@
     min-height: calc(100vh - 200px);
   }
 
-  .page-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 2rem;
-  }
-
-  .page-title {
-    font-size: 2rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 0 0 0.5rem 0;
-  }
-
-  .page-subtitle {
-    font-size: 1rem;
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
   .filters-section {
     background-color: var(--background);
     padding: 1.5rem;
@@ -557,27 +533,6 @@
     font-size: 0.875rem;
   }
 
-  .view-toggle {
-    display: flex;
-    gap: 0.25rem;
-    background-color: var(--surface);
-    padding: 0.25rem;
-    border-radius: var(--radius);
-  }
-
-  .view-btn {
-    padding: 0.5rem 0.875rem;
-    font-size: 1.25rem;
-    border-radius: var(--radius);
-    color: var(--text-secondary);
-    transition: all var(--transition);
-  }
-
-  .view-btn:hover {
-    background-color: var(--surface-hover);
-    color: var(--text-primary);
-  }
-
   .view-btn.active {
     background-color: var(--primary);
     color: white;
@@ -709,10 +664,6 @@
   }
 
   @media (max-width: 768px) {
-    .page-title {
-      font-size: 1.5rem;
-    }
-
     .filter-row {
       flex-direction: column;
       align-items: stretch;
@@ -720,10 +671,6 @@
 
     .filter-group {
       min-width: auto;
-    }
-
-    .view-toggle {
-      align-self: flex-end;
     }
 
     .items-grid {

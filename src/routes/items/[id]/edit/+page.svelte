@@ -3,10 +3,12 @@
   import { appStore } from '$lib/store';
   import { goto } from '$app/navigation';
   import Toast from '$lib/components/Toast.svelte';
+  import Modal from '$lib/components/Modal.svelte';
   import FriendPicker from '$lib/components/FriendPicker.svelte';
   import type { PermissionLevel } from '$lib/types';
   import { formatDisplayDate, todayLocalISO } from '$lib/dates';
   import { useToast } from '$lib/useToast.svelte';
+  import PageHeader from '$lib/components/PageHeader.svelte';
 
   let itemId = $derived($page.params.id);
   let item = $derived($appStore.items.find((i) => i.id === itemId));
@@ -40,7 +42,6 @@
 
   // Delete confirmation modal
   let showDeleteConfirm = $state(false);
-  let deleteModalElement = $state<HTMLDivElement | undefined>();
   let onLoan = $derived(
     !!item &&
       $appStore.borrowRequests.some(
@@ -62,16 +63,6 @@
     toaster.showToast('Item deleted', 'success');
     setTimeout(() => goto('/my-items'), 600);
   }
-
-  function handleDeleteModalKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') showDeleteConfirm = false;
-  }
-
-  $effect(() => {
-    if (showDeleteConfirm && deleteModalElement) {
-      deleteModalElement.focus();
-    }
-  });
 
   // Category state
   let parentCategoryId = $state('');
@@ -204,12 +195,7 @@
 {:else}
   <div class="edit-item-page fade-in">
     <div class="container">
-      <header class="page-header">
-        <div>
-          <h1 class="page-title">Edit Item</h1>
-          <p class="page-subtitle">Update your item details and availability</p>
-        </div>
-      </header>
+      <PageHeader title="Edit Item" subtitle="Update your item details and availability" />
 
       <div class="form-card card">
         <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
@@ -480,17 +466,13 @@
 {/if}
 
 {#if showDeleteConfirm && item}
-  <!-- svelte-ignore a11y_click_events_have_key_events - Modal overlay has onkeydown handler for Escape key -->
-  <div class="modal-overlay" onclick={() => (showDeleteConfirm = false)} onkeydown={handleDeleteModalKeydown} role="presentation">
-    <div class="modal-content" bind:this={deleteModalElement} onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="delete-modal-title" tabindex="-1">
-      <h2 id="delete-modal-title">Delete {item.name}?</h2>
-      <p>This can't be undone. Past borrow history is kept, but the item disappears from your library, collections, and wishlists.</p>
-      <div class="modal-actions">
-        <button class="btn btn-error" onclick={confirmDelete}>Delete Item</button>
-        <button class="btn btn-secondary" onclick={() => (showDeleteConfirm = false)}>Cancel</button>
-      </div>
-    </div>
-  </div>
+  <Modal title="Delete {item.name}?" size="sm" onClose={() => (showDeleteConfirm = false)}>
+    <p>This can't be undone. Past borrow history is kept, but the item disappears from your library, collections, and wishlists.</p>
+    {#snippet actions()}
+      <button class="btn btn-error" onclick={confirmDelete}>Delete Item</button>
+      <button class="btn btn-secondary" onclick={() => (showDeleteConfirm = false)}>Cancel</button>
+    {/snippet}
+  </Modal>
 {/if}
 
 {#if toaster.toast}
@@ -498,27 +480,6 @@
 {/if}
 
 <style>
-  .page-header {
-    margin-bottom: 2rem;
-  }
-
-  .page-title {
-    font-size: 2rem;
-    font-weight: 700;
-    margin: 0 0 0.5rem 0;
-  }
-
-  .page-subtitle {
-    font-size: 1rem;
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  .form-card {
-    padding: 2rem;
-    max-width: 800px;
-  }
-
   .form-section {
     margin-bottom: 2.5rem;
     padding-bottom: 2.5rem;
@@ -585,36 +546,10 @@
     gap: 1rem;
   }
 
-  .image-preview {
-    margin-top: 1rem;
-    border-radius: var(--radius);
-    overflow: hidden;
-    max-width: 400px;
-  }
-
-  .image-preview img {
-    width: 100%;
-    height: 200px;
-    object-fit: cover;
-    display: block;
-  }
-
   .radio-group {
     display: flex;
     gap: 1rem;
     flex-wrap: wrap;
-  }
-
-  .radio-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-  }
-
-  .radio-label input[type='radio'] {
-    width: auto;
-    cursor: pointer;
   }
 
   .radio-label .badge {
@@ -626,58 +561,6 @@
     background-color: var(--primary);
     color: white;
     border-color: var(--primary);
-  }
-
-  .radio-group-vertical {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .radio-label-vertical {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 1rem;
-    border: 2px solid var(--border);
-    border-radius: var(--radius);
-    cursor: pointer;
-    transition: all var(--transition);
-  }
-
-  .radio-label-vertical:hover {
-    border-color: var(--primary);
-    background-color: rgba(16, 185, 129, 0.05);
-  }
-
-  .radio-label-vertical input[type='radio'] {
-    width: auto;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-
-  .radio-label-vertical input[type='radio']:checked {
-    accent-color: var(--primary);
-  }
-
-  .radio-label-vertical input[type='radio']:checked ~ .permission-info {
-    color: var(--primary);
-  }
-
-  .permission-info {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .permission-title {
-    font-weight: 600;
-    font-size: 0.9375rem;
-  }
-
-  .permission-desc {
-    font-size: 0.8125rem;
-    color: var(--text-secondary);
   }
 
   .date-block-form {
@@ -739,16 +622,7 @@
     padding-top: 1rem;
   }
 
-  .error-state {
-    text-align: center;
-    padding: 4rem 2rem;
-  }
-
   @media (max-width: 768px) {
-    .form-card {
-      padding: 1.5rem;
-    }
-
     .form-row {
       grid-template-columns: 1fr;
     }
@@ -804,46 +678,30 @@
     cursor: not-allowed;
   }
 
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 1rem;
-  }
-
-  .modal-content {
-    background: var(--background);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
-    max-width: 440px;
-    width: 100%;
-    padding: 2rem;
-  }
-
-  .modal-content h2 {
-    margin: 0 0 0.75rem 0;
-    font-size: 1.375rem;
-  }
-
-  .modal-content p {
-    margin: 0 0 1.5rem 0;
-    color: var(--text-secondary);
-  }
-
-  .modal-actions {
-    display: flex;
-    gap: 0.75rem;
-    justify-content: flex-end;
-  }
-
   @media (max-width: 768px) {
     .danger-zone {
       flex-direction: column;
       align-items: stretch;
     }
+  }
+
+  /* These stay in the page so they out-rank `.form-group input` above */
+  .radio-label input[type='radio'] {
+    width: auto;
+    cursor: pointer;
+  }
+
+  .radio-label-vertical input[type='radio'] {
+    width: auto;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .radio-label-vertical input[type='radio']:checked {
+    accent-color: var(--primary);
+  }
+
+  .radio-label-vertical input[type='radio']:checked ~ .permission-info {
+    color: var(--primary);
   }
 </style>

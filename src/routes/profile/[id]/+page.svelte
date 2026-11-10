@@ -3,7 +3,12 @@
   import { appStore, canUserViewItem, canViewBorrowerFeedback, getBorrowerFeedback } from '$lib/store';
   import FallbackImage from '$lib/components/FallbackImage.svelte';
   import ItemCard from '$lib/components/ItemCard.svelte';
+  import Avatar from '$lib/components/Avatar.svelte';
+  import StarRating from '$lib/components/StarRating.svelte';
+  import RatingScore from '$lib/components/RatingScore.svelte';
   import { formatDisplayDate } from '$lib/dates';
+  import EmptyState from '$lib/components/EmptyState.svelte';
+  import Tabs from '$lib/components/Tabs.svelte';
 
   let userId = $derived($page.params.id);
   let user = $derived($appStore.users.find((u) => u.id === userId));
@@ -80,14 +85,14 @@
   <div class="profile-page fade-in">
     <div class="container">
       <div class="profile-header card">
-        <img src={user.profilePic} alt={user.name} class="profile-avatar" />
+        <Avatar src={user.profilePic} alt={user.name} size="150px" border="4px" />
         <div class="profile-info">
           <h1 class="profile-name">{user.name}</h1>
           <p class="profile-bio">{user.bio}</p>
 
           <div class="profile-stats">
             <div class="stat-item">
-              <span class="stat-value"><span aria-hidden="true">⭐</span> {user.rating.toFixed(1)}</span>
+              <span class="stat-value"><RatingScore value={user.rating} /></span>
               <span class="stat-label">Rating</span>
             </div>
             <div class="stat-item">
@@ -120,14 +125,13 @@
         <section class="items-section">
           <h2 class="section-title">Available Items ({userItems.length})</h2>
           {#if userItems.length === 0}
-            <div class="empty-state">
-              <span class="empty-icon" aria-hidden="true">📦</span>
-              <p>
-                {isCurrentUser
-                  ? "You haven't added any items yet"
-                  : `${user.name} hasn't added any items yet`}
-              </p>
-            </div>
+            <EmptyState
+              compact
+              icon="📦"
+              description={isCurrentUser
+                ? "You haven't added any items yet"
+                : `${user.name} hasn't added any items yet`}
+            />
           {:else}
             <div class="items-grid">
               {#each userItems as item (item.id)}
@@ -141,9 +145,7 @@
           <section class="feedback-section">
             <h2 class="section-title">What lenders say</h2>
             {#if lenderFeedback.length === 0}
-              <div class="empty-state">
-                <p>No lender feedback yet</p>
-              </div>
+              <EmptyState compact description="No lender feedback yet" />
             {:else}
               <div class="feedback-list">
                 {#each lenderFeedback as entry (entry.id)}
@@ -162,10 +164,8 @@
                       {/if}
                     </div>
                     {#if entry.borrowerRating}
-                      <div class="history-rating" role="img" aria-label="{entry.borrowerRating} out of 5 stars">
-                        {#each Array(Math.max(0, Math.min(5, Math.floor(Number(entry.borrowerRating) || 0)))) as _}
-                          <span aria-hidden="true">⭐</span>
-                        {/each}
+                      <div class="history-rating">
+                        <StarRating value={entry.borrowerRating} label="{entry.borrowerRating} out of 5 stars" />
                       </div>
                     {/if}
                     {#if entry.borrowerReview?.trim()}
@@ -194,30 +194,15 @@
           <section class="history-section">
             <h2 class="section-title">Activity History</h2>
 
-            <div class="activity-tabs">
-              <button
-                class="activity-tab"
-                class:active={activityTab === 'borrowing'}
-                onclick={() => (activityTab = 'borrowing')}
-              >
-                <span aria-hidden="true">📤</span>
-                <span>Borrowing</span>
-                {#if borrowingActivity.length > 0}
-                  <span class="tab-badge">{borrowingActivity.length}</span>
-                {/if}
-              </button>
-              <button
-                class="activity-tab"
-                class:active={activityTab === 'lending'}
-                onclick={() => (activityTab = 'lending')}
-              >
-                <span aria-hidden="true">📥</span>
-                <span>Lending</span>
-                {#if lendingActivity.length > 0}
-                  <span class="tab-badge">{lendingActivity.length}</span>
-                {/if}
-              </button>
-            </div>
+            <Tabs
+              label="Activity history"
+              scroll={false}
+              bind:value={activityTab}
+              tabs={[
+                { id: 'borrowing', label: 'Borrowing', icon: '📤', count: borrowingActivity.length },
+                { id: 'lending', label: 'Lending', icon: '📥', count: lendingActivity.length }
+              ]}
+            />
 
             <div class="history-list">
               {#each (activityTab === 'borrowing' ? borrowingActivity : lendingActivity).slice(0, 10) as activity}
@@ -282,10 +267,8 @@
                       {/if}
                     </div>
                     {#if 'reviewerId' in activity && activity.reviewerId && activity.rating}
-                      <div class="history-rating" title="{activityTab === 'borrowing' ? 'Their' : "The borrower's"} review of the item">
-                        {#each Array(Math.max(0, Math.min(5, Math.floor(Number(activity.rating) || 0)))) as _}
-                          <span aria-hidden="true">⭐</span>
-                        {/each}
+                      <div class="history-rating">
+                        <StarRating value={activity.rating} title="{activityTab === 'borrowing' ? 'Their' : "The borrower's"} review of the item" />
                       </div>
                     {/if}
                   </div>
@@ -305,15 +288,6 @@
     gap: 2rem;
     padding: 2rem;
     margin-bottom: 2rem;
-  }
-
-  .profile-avatar {
-    width: 150px;
-    height: 150px;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 4px solid var(--primary);
-    flex-shrink: 0;
   }
 
   .profile-info {
@@ -377,66 +351,8 @@
     gap: 1.5rem;
   }
 
-  .empty-state {
-    text-align: center;
-    padding: 3rem 2rem;
-  }
-
-  .empty-icon {
-    font-size: 3rem;
-    display: block;
-    margin-bottom: 1rem;
-  }
-
-  .empty-state p {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
   .history-section {
     margin-top: 3rem;
-  }
-
-  .activity-tabs {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
-    border-bottom: 2px solid var(--border);
-  }
-
-  .activity-tab {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 1rem 1.5rem;
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
-    cursor: pointer;
-    font-size: 0.9375rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-    transition: all var(--transition);
-  }
-
-  .activity-tab:hover {
-    color: var(--text-primary);
-    background-color: var(--surface);
-  }
-
-  .activity-tab.active {
-    color: var(--primary);
-    border-bottom-color: var(--primary);
-  }
-
-  .activity-tab .tab-badge {
-    background-color: var(--primary);
-    color: white;
-    padding: 0.125rem 0.5rem;
-    border-radius: 10px;
-    font-size: 0.75rem;
-    font-weight: 600;
   }
 
   .history-list {
@@ -513,12 +429,6 @@
 
   .history-rating {
     margin-top: 0.25rem;
-    font-size: 0.875rem;
-  }
-
-  .error-state {
-    text-align: center;
-    padding: 4rem 2rem;
   }
 
   @media (max-width: 768px) {

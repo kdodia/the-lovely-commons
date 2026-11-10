@@ -12,12 +12,19 @@
   } from '$lib/store';
   import { page } from '$app/stores';
   import Toast from '$lib/components/Toast.svelte';
+  import RatingScore from '$lib/components/RatingScore.svelte';
+  import Modal from '$lib/components/Modal.svelte';
+  import UserChip from '$lib/components/UserChip.svelte';
+  import StarRatingInput from '$lib/components/StarRatingInput.svelte';
   import LoanCard from '$lib/components/LoanCard.svelte';
   import RequestThread from '$lib/components/RequestThread.svelte';
   import { MAX_RATING, MIN_RATING, DEFAULT_RATING } from '$lib/constants';
   import { formatDisplayDate } from '$lib/dates';
   import { useToast } from '$lib/useToast.svelte';
   import type { ItemCondition } from '$lib/types';
+  import EmptyState from '$lib/components/EmptyState.svelte';
+  import PageHeader from '$lib/components/PageHeader.svelte';
+  import Tabs from '$lib/components/Tabs.svelte';
 
   const TABS = ['incoming', 'outgoing', 'lending', 'borrowing'] as const;
   type Tab = (typeof TABS)[number];
@@ -57,8 +64,6 @@
   let selectedLoanId = $state<string | null>(null);
   let returnRating = $state(DEFAULT_RATING);
   let returnReview = $state('');
-  let hoveredStar = $state(0);
-  let returnModalElement = $state<HTMLDivElement | undefined>();
   let conditionChanged = $state(false);
   let newCondition = $state<ItemCondition>('good');
 
@@ -222,30 +227,11 @@
     returnReview = '';
     conditionChanged = false;
   }
-
-  // Handle escape key for modal
-  function handleModalKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      cancelReturn();
-    }
-  }
-
-  // Focus modal when it opens
-  $effect(() => {
-    if (showReturnModal && returnModalElement) {
-      returnModalElement.focus();
-    }
-  });
 </script>
 
 <div class="dashboard-page fade-in">
   <div class="container">
-    <header class="page-header">
-      <div>
-        <h1 class="page-title">Dashboard</h1>
-        <p class="page-subtitle">Manage what you're lending and borrowing</p>
-      </div>
-    </header>
+    <PageHeader title="Dashboard" subtitle="Manage what you're lending and borrowing" />
 
     {#if $overdueLentLoans.length > 0 || $overdueBorrowedLoans.length > 0}
       <div class="overdue-banner" role="status">
@@ -265,82 +251,25 @@
       </div>
     {/if}
 
-    <div class="dashboard-tabs" role="tablist" aria-label="Dashboard sections">
-      <button
-        role="tab"
-        class="tab"
-        class:active={activeTab === 'incoming'}
-        aria-selected={activeTab === 'incoming'}
-        aria-controls="incoming-panel"
-        aria-label="Incoming Requests"
-        id="incoming-tab"
-        onclick={() => (activeTab = 'incoming')}
-      >
-        <span aria-hidden="true">📥</span>
-        <span>Incoming Requests</span>
-        {#if $incomingRequests.length > 0}
-          <span class="tab-badge" aria-label="{$incomingRequests.length} incoming requests">{$incomingRequests.length}</span>
-        {/if}
-      </button>
-
-      <button
-        role="tab"
-        class="tab"
-        class:active={activeTab === 'outgoing'}
-        aria-selected={activeTab === 'outgoing'}
-        aria-controls="outgoing-panel"
-        aria-label="My Requests"
-        id="outgoing-tab"
-        onclick={() => (activeTab = 'outgoing')}
-      >
-        <span aria-hidden="true">📤</span>
-        <span>My Requests</span>
-      </button>
-
-      <button
-        role="tab"
-        class="tab"
-        class:active={activeTab === 'lending'}
-        aria-selected={activeTab === 'lending'}
-        aria-controls="lending-panel"
-        aria-label="Lending"
-        id="lending-tab"
-        onclick={() => (activeTab = 'lending')}
-      >
-        <span aria-hidden="true">🤝</span>
-        <span>Lending</span>
-        {#if lendingCount > 0}
-          <span class="tab-badge" aria-label="{lendingCount} items lent out">{lendingCount}</span>
-        {/if}
-      </button>
-
-      <button
-        role="tab"
-        class="tab"
-        class:active={activeTab === 'borrowing'}
-        aria-selected={activeTab === 'borrowing'}
-        aria-controls="borrowing-panel"
-        aria-label="Borrowing"
-        id="borrowing-tab"
-        onclick={() => (activeTab = 'borrowing')}
-      >
-        <span aria-hidden="true">🎒</span>
-        <span>Borrowing</span>
-        {#if borrowingLoans.length > 0}
-          <span class="tab-badge" aria-label="{borrowingLoans.length} items borrowed">{borrowingLoans.length}</span>
-        {/if}
-      </button>
-    </div>
+    <Tabs
+      variant="page"
+      iconsOnly
+      panels
+      label="Dashboard sections"
+      bind:value={activeTab}
+      tabs={[
+        { id: 'incoming', label: 'Incoming Requests', icon: '📥', count: $incomingRequests.length, countLabel: `${$incomingRequests.length} incoming requests` },
+        { id: 'outgoing', label: 'My Requests', icon: '📤' },
+        { id: 'lending', label: 'Lending', icon: '🤝', count: lendingCount, countLabel: `${lendingCount} items lent out` },
+        { id: 'borrowing', label: 'Borrowing', icon: '🎒', count: borrowingLoans.length, countLabel: `${borrowingLoans.length} items borrowed` }
+      ]}
+    />
 
     <div class="tab-content">
       {#if activeTab === 'incoming'}
         <div class="requests-list" id="incoming-panel" role="tabpanel" aria-labelledby="incoming-tab">
           {#if $incomingRequests.length === 0}
-            <div class="empty-state">
-              <span class="empty-icon" aria-hidden="true">📬</span>
-              <h3>No incoming requests</h3>
-              <p>When people request to borrow your items, they'll appear here</p>
-            </div>
+            <EmptyState icon="📬" title="No incoming requests" description="When people request to borrow your items, they'll appear here" />
           {:else}
             {#each $incomingRequests as request (request.id)}
               {@const item = $appStore.items.find((i) => i.id === request.itemId)}
@@ -355,15 +284,8 @@
                       <h3 class="request-title">{item?.name}</h3>
                     </a>
                     <div class="request-meta">
-                      <a href="/profile/{borrower?.id}" class="user-link">
-                        <img
-                          src={borrower?.profilePic}
-                          alt={borrower?.name}
-                          class="borrower-avatar"
-                        />
-                        <span class="borrower-name">{borrower?.name}</span>
-                      </a>
-                      <span class="rating"><span aria-hidden="true">⭐</span> {borrower?.rating.toFixed(1)}</span>
+                      <UserChip userId={borrower?.id} name={borrower?.name ?? ''} src={borrower?.profilePic} />
+                      <span class="rating"><RatingScore value={borrower?.rating} /></span>
                     </div>
                     <div class="request-dates">
                       <span aria-hidden="true">📅</span>
@@ -395,11 +317,7 @@
       {:else if activeTab === 'outgoing'}
         <div class="requests-list" id="outgoing-panel" role="tabpanel" aria-labelledby="outgoing-tab">
           {#if $outgoingRequests.length === 0}
-            <div class="empty-state">
-              <span class="empty-icon" aria-hidden="true">📦</span>
-              <h3>No outgoing requests</h3>
-              <p>Requests you make to borrow items will appear here</p>
-            </div>
+            <EmptyState icon="📦" title="No outgoing requests" description="Requests you make to borrow items will appear here" />
           {:else}
             {#each $outgoingRequests as request (request.id)}
               {@const item = $appStore.items.find((i) => i.id === request.itemId)}
@@ -415,10 +333,7 @@
                     </a>
                     <div class="request-meta">
                       <span>Requested from</span>
-                      <a href="/profile/{lender?.id}" class="user-link">
-                        <img src={lender?.profilePic} alt={lender?.name} class="borrower-avatar" />
-                        <span class="borrower-name">{lender?.name}</span>
-                      </a>
+                      <UserChip userId={lender?.id} name={lender?.name ?? ''} src={lender?.profilePic} />
                     </div>
                     <div class="request-dates">
                       <span aria-hidden="true">📅</span>
@@ -464,11 +379,7 @@
       {:else if activeTab === 'lending'}
         <div class="requests-list" id="lending-panel" role="tabpanel" aria-labelledby="lending-tab">
           {#if lendingLoans.length === 0}
-            <div class="empty-state">
-              <span class="empty-icon" aria-hidden="true">📋</span>
-              <h3>Nothing lent out right now</h3>
-              <p>Items you've approved for borrowing will appear here</p>
-            </div>
+            <EmptyState icon="📋" title="Nothing lent out right now" description="Items you've approved for borrowing will appear here" />
           {:else}
             <p class="panel-hint">
               Pickups and returns need a confirmation from both of you, so the app reflects who
@@ -490,11 +401,7 @@
       {:else if activeTab === 'borrowing'}
         <div class="requests-list" id="borrowing-panel" role="tabpanel" aria-labelledby="borrowing-tab">
           {#if borrowingLoans.length === 0}
-            <div class="empty-state">
-              <span class="empty-icon" aria-hidden="true">🎒</span>
-              <h3>You're not borrowing anything</h3>
-              <p>Approved requests and items you're holding will appear here</p>
-            </div>
+            <EmptyState icon="🎒" title="You're not borrowing anything" description="Approved requests and items you're holding will appear here" />
           {:else}
             <p class="panel-hint">
               Confirm when you pick an item up and again when you hand it back — the lender
@@ -518,111 +425,84 @@
 </div>
 
 {#if showReturnModal}
-  <!-- svelte-ignore a11y_click_events_have_key_events - Modal overlay has onkeydown handler for Escape key -->
-  <div class="modal-overlay" onclick={cancelReturn} onkeydown={handleModalKeydown} role="presentation">
-    <div class="modal-content" bind:this={returnModalElement} onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="return-modal-title" tabindex="-1">
-      <div class="modal-header">
-        <h2 id="return-modal-title">Confirm Return</h2>
-        <button class="modal-close" onclick={cancelReturn} aria-label="Close modal">✕</button>
-      </div>
-
-      <div class="modal-body">
-        <div class="form-group">
-          <!-- svelte-ignore a11y_label_has_associated_control - Label is associated with radiogroup via aria-labelledby -->
-          <label id="rating-label">How was lending to {selectedLoanBorrower?.name ?? 'this borrower'}?</label>
-          <p class="modal-hint">This rates the borrower, not the item — they'll be asked to review the item separately.</p>
-          <div class="star-rating" role="radiogroup" aria-labelledby="rating-label">
-            {#each [1, 2, 3, 4, 5] as star}
-              <button
-                type="button"
-                class="star"
-                class:filled={star <= (hoveredStar || returnRating)}
-                role="radio"
-                aria-label="Rate {star} out of 5 stars"
-                aria-checked={star === returnRating}
-                onclick={() => (returnRating = star)}
-                onmouseenter={() => (hoveredStar = star)}
-                onmouseleave={() => (hoveredStar = 0)}
-              >
-                <span aria-hidden="true">⭐</span>
-              </button>
-            {/each}
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="review">Note (optional)</label>
-          <textarea
-            id="review"
-            bind:value={returnReview}
-            placeholder="Returned on time? Good communication?"
-            rows="3"
-          ></textarea>
-        </div>
-
-        <!-- Condition tracking section -->
-        <div class="form-group condition-section">
-          <div class="condition-header">
-            <span class="condition-title">Item Condition</span>
-            {#if selectedLoanItem}
-              <span class="current-condition">
-                Current: <strong>{conditionLabels[selectedLoanItem.condition].label}</strong>
-              </span>
-            {/if}
-          </div>
-
-          <div class="condition-toggle">
-            <label class="toggle-label">
-              <input
-                type="checkbox"
-                bind:checked={conditionChanged}
-                class="toggle-checkbox"
-              />
-              <span class="toggle-text">Condition has changed</span>
-            </label>
-          </div>
-
-          {#if conditionChanged}
-            <div class="condition-options" role="radiogroup" aria-label="Select new condition">
-              {#each (['excellent', 'good', 'fair', 'poor'] as const) as condition}
-                <label
-                  class="condition-option"
-                  class:selected={newCondition === condition}
-                  class:downgrade={selectedLoanItem && condition !== selectedLoanItem.condition &&
-                    ['excellent', 'good', 'fair', 'poor'].indexOf(condition) >
-                    ['excellent', 'good', 'fair', 'poor'].indexOf(selectedLoanItem.condition)}
-                >
-                  <input
-                    type="radio"
-                    name="condition"
-                    value={condition}
-                    bind:group={newCondition}
-                    class="sr-only"
-                  />
-                  <span class="condition-label">{conditionLabels[condition].label}</span>
-                  <span class="condition-description">{conditionLabels[condition].description}</span>
-                </label>
-              {/each}
-            </div>
-            {#if selectedLoanItem && newCondition !== selectedLoanItem.condition}
-              <p class="condition-note">
-                {#if ['excellent', 'good', 'fair', 'poor'].indexOf(newCondition) > ['excellent', 'good', 'fair', 'poor'].indexOf(selectedLoanItem.condition)}
-                  <span class="note-warning">⚠️ This will downgrade the item's condition from {conditionLabels[selectedLoanItem.condition].label} to {conditionLabels[newCondition].label}</span>
-                {:else}
-                  <span class="note-upgrade">✨ This will upgrade the item's condition to {conditionLabels[newCondition].label}</span>
-                {/if}
-              </p>
-            {/if}
-          {/if}
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick={cancelReturn}>Cancel</button>
-        <button class="btn btn-primary" onclick={submitReturn}>Confirm Return</button>
-      </div>
+  <Modal title="Confirm Return" size="form" onClose={cancelReturn}>
+    <div class="form-group">
+      <!-- svelte-ignore a11y_label_has_associated_control - Label is associated with radiogroup via aria-labelledby -->
+      <label id="rating-label">How was lending to {selectedLoanBorrower?.name ?? 'this borrower'}?</label>
+      <p class="modal-hint">This rates the borrower, not the item — they'll be asked to review the item separately.</p>
+      <StarRatingInput bind:value={returnRating} labelledby="rating-label" size="lg" />
     </div>
-  </div>
+
+    <div class="form-group">
+      <label for="review">Note (optional)</label>
+      <textarea
+        id="review"
+        bind:value={returnReview}
+        placeholder="Returned on time? Good communication?"
+        rows="3"
+      ></textarea>
+    </div>
+
+    <!-- Condition tracking section -->
+    <div class="form-group condition-section">
+      <div class="condition-header">
+        <span class="condition-title">Item Condition</span>
+        {#if selectedLoanItem}
+          <span class="current-condition">
+            Current: <strong>{conditionLabels[selectedLoanItem.condition].label}</strong>
+          </span>
+        {/if}
+      </div>
+
+      <div class="condition-toggle">
+        <label class="toggle-label">
+          <input
+            type="checkbox"
+            bind:checked={conditionChanged}
+            class="toggle-checkbox"
+          />
+          <span class="toggle-text">Condition has changed</span>
+        </label>
+      </div>
+
+      {#if conditionChanged}
+        <div class="condition-options" role="radiogroup" aria-label="Select new condition">
+          {#each (['excellent', 'good', 'fair', 'poor'] as const) as condition}
+            <label
+              class="condition-option"
+              class:selected={newCondition === condition}
+              class:downgrade={selectedLoanItem && condition !== selectedLoanItem.condition &&
+                ['excellent', 'good', 'fair', 'poor'].indexOf(condition) >
+                ['excellent', 'good', 'fair', 'poor'].indexOf(selectedLoanItem.condition)}
+            >
+              <input
+                type="radio"
+                name="condition"
+                value={condition}
+                bind:group={newCondition}
+                class="sr-only"
+              />
+              <span class="condition-label">{conditionLabels[condition].label}</span>
+              <span class="condition-description">{conditionLabels[condition].description}</span>
+            </label>
+          {/each}
+        </div>
+        {#if selectedLoanItem && newCondition !== selectedLoanItem.condition}
+          <p class="condition-note">
+            {#if ['excellent', 'good', 'fair', 'poor'].indexOf(newCondition) > ['excellent', 'good', 'fair', 'poor'].indexOf(selectedLoanItem.condition)}
+              <span class="note-warning">⚠️ This will downgrade the item's condition from {conditionLabels[selectedLoanItem.condition].label} to {conditionLabels[newCondition].label}</span>
+            {:else}
+              <span class="note-upgrade">✨ This will upgrade the item's condition to {conditionLabels[newCondition].label}</span>
+            {/if}
+          </p>
+        {/if}
+      {/if}
+    </div>
+    {#snippet actions()}
+      <button class="btn btn-secondary" onclick={cancelReturn}>Cancel</button>
+      <button class="btn btn-primary" onclick={submitReturn}>Confirm Return</button>
+    {/snippet}
+  </Modal>
 {/if}
 
 {#if toaster.toast}
@@ -630,22 +510,6 @@
 {/if}
 
 <style>
-  .page-header {
-    margin-bottom: 2rem;
-  }
-
-  .page-title {
-    font-size: 2rem;
-    font-weight: 700;
-    margin: 0 0 0.5rem 0;
-  }
-
-  .page-subtitle {
-    font-size: 1rem;
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
   .overdue-banner {
     display: flex;
     align-items: center;
@@ -684,54 +548,6 @@
     text-decoration: none;
   }
 
-  .dashboard-tabs {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 2rem;
-    border-bottom: 2px solid var(--border);
-    overflow-x: auto;
-  }
-
-  .tab {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 1rem 1.5rem;
-    background: none;
-    border: none;
-    border-bottom: 3px solid transparent;
-    color: var(--text-secondary);
-    font-weight: 500;
-    cursor: pointer;
-    transition: all var(--transition);
-    white-space: nowrap;
-  }
-
-  .tab:hover {
-    color: var(--text-primary);
-    background-color: var(--surface);
-  }
-
-  .tab.active {
-    color: var(--primary);
-    border-bottom-color: var(--primary);
-  }
-
-  .tab-badge {
-    background-color: var(--primary);
-    color: white;
-    padding: 0.125rem 0.5rem;
-    border-radius: 9999px;
-    font-size: 0.75rem;
-    font-weight: 700;
-  }
-
-  .requests-list {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
   .panel-hint {
     margin: 0 0 0.5rem 0;
     font-size: 0.875rem;
@@ -744,29 +560,11 @@
     color: var(--text-secondary);
   }
 
-  .request-card {
-    padding: 1.5rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1.5rem;
-  }
-
   .request-content {
     display: flex;
     gap: 1.5rem;
     flex: 1;
     min-width: 0;
-  }
-
-  .request-item-link {
-    display: block;
-    flex-shrink: 0;
-    transition: opacity var(--transition);
-  }
-
-  .request-item-link:hover {
-    opacity: 0.8;
   }
 
   .request-item-image {
@@ -784,62 +582,6 @@
     gap: 0.75rem;
     flex: 1;
     min-width: 0;
-  }
-
-  .request-title-link {
-    text-decoration: none;
-    color: inherit;
-    transition: color var(--transition);
-  }
-
-  .request-title-link:hover {
-    color: var(--primary);
-  }
-
-  .request-title {
-    font-size: 1.25rem;
-    font-weight: 600;
-    margin: 0;
-  }
-
-  .user-link {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    text-decoration: none;
-    color: inherit;
-    transition: all var(--transition);
-    border-radius: var(--radius);
-    padding: 0.25rem 0.5rem;
-    margin: -0.25rem -0.5rem;
-  }
-
-  .user-link:hover {
-    background-color: rgba(16, 185, 129, 0.1);
-  }
-
-  .user-link:hover .borrower-name {
-    color: var(--primary);
-  }
-
-  .request-meta {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-  }
-
-  .borrower-avatar {
-    width: 1.75rem;
-    height: 1.75rem;
-    border-radius: 50%;
-    object-fit: cover;
-  }
-
-  .borrower-name {
-    font-weight: 500;
-    color: var(--text-primary);
   }
 
   .request-dates {
@@ -870,118 +612,6 @@
 
   .status-badge-inline {
     margin-top: 0.5rem;
-  }
-
-  .empty-state {
-    text-align: center;
-    padding: 4rem 2rem;
-  }
-
-  .empty-icon {
-    font-size: 4rem;
-    display: block;
-    margin-bottom: 1rem;
-  }
-
-  .empty-state h3 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin: 0 0 0.5rem 0;
-  }
-
-  .empty-state p {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  /* Modal styles */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 1rem;
-  }
-
-  .modal-content {
-    background: var(--background);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
-    max-width: 500px;
-    width: 100%;
-    max-height: 90vh;
-    overflow-y: auto;
-  }
-
-  .modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 1.5rem;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .modal-header h2 {
-    margin: 0;
-    font-size: 1.5rem;
-    font-weight: 600;
-  }
-
-  .modal-close {
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    cursor: pointer;
-    color: var(--text-secondary);
-    padding: 0.25rem;
-    line-height: 1;
-    transition: color var(--transition);
-  }
-
-  .modal-close:hover {
-    color: var(--text-primary);
-  }
-
-  .modal-body {
-    padding: 1.5rem;
-  }
-
-  .modal-footer {
-    display: flex;
-    gap: 0.75rem;
-    padding: 1.5rem;
-    border-top: 1px solid var(--border);
-    justify-content: flex-end;
-  }
-
-  .star-rating {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-  }
-
-  .star {
-    background: none;
-    border: none;
-    font-size: 2rem;
-    cursor: pointer;
-    padding: 0;
-    transition: transform var(--transition), opacity var(--transition);
-    opacity: 0.3;
-  }
-
-  .star:hover {
-    transform: scale(1.2);
-  }
-
-  .star.filled {
-    opacity: 1;
   }
 
   .form-group {
@@ -1017,11 +647,6 @@
   }
 
   @media (max-width: 768px) {
-    .request-card {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
     .request-content {
       flex-direction: column;
     }
@@ -1035,14 +660,6 @@
       flex-direction: row;
     }
 
-    .tab {
-      padding: 0.875rem 1rem;
-      font-size: 0.875rem;
-    }
-
-    .tab span:nth-child(2) {
-      display: none;
-    }
   }
 
   /* Condition tracking styles */
