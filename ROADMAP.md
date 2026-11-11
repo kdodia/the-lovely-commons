@@ -133,9 +133,6 @@ Feature work is paused: hands-on UX testing comes next, then a design spec
 for a real, federated system.
 
 1. **Rough edges testers may hit** (found during the restructure, not fixed):
-   - Pressing "Request to Borrow" before touching the calendar presets the
-     start date, after which calendar clicks do nothing until "Clear" is
-     pressed (`DateRangeCalendar` and the item page's open handler).
    - Approving a request marks the whole item unavailable, even for a loan
      weeks away, so nobody can request other dates meanwhile.
    - The nudge cooldown is counted differently by the item page

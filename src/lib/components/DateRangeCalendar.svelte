@@ -34,22 +34,18 @@
 
   // Current view state
   let viewDate = $state(new Date());
-  let selectingEndDate = $state(false);
   let hoverDate = $state<string | null>(null);
   let conflictMessage = $state<string | null>(null);
+
+  // Waiting for an end date follows from the dates the parent gives us, not
+  // from private state: a start without an end means the next click on a
+  // later day completes the range, however the start was set (a click here,
+  // or a preset from the request form).
+  let selectingEndDate = $derived(!!startDate && !endDate);
 
   // Normalize minDate to local midnight so "today" isn't treated as past
   // when a caller passes a Date carrying the current wall-clock time.
   let minDay = $derived(startOfLocalDay(minDate));
-
-  // When the parent clears the selection (e.g. the request form is
-  // cancelled), leave selection mode instead of staying stuck in it.
-  $effect(() => {
-    if (!startDate) {
-      selectingEndDate = false;
-      hoverDate = null;
-    }
-  });
 
   // Show the month containing a selection the parent pre-filled.
   $effect(() => {
@@ -160,12 +156,12 @@
   function handleDateClick(day: DateInfo) {
     if (day.isPast || day.isBooked || day.isBlocked) return;
 
-    if (!startDate || (startDate && endDate) || (selectingEndDate && day.dateStr < startDate)) {
-      // Start new selection
+    if (!selectingEndDate || day.dateStr < startDate) {
+      // No start yet, a complete range, or a day before the start: begin a
+      // new selection here.
       conflictMessage = null;
       onDateSelect?.(day.dateStr, null);
-      selectingEndDate = true;
-    } else if (selectingEndDate && day.dateStr >= startDate) {
+    } else {
       // Complete the selection (same-day borrows are allowed). Check the full
       // range against every booked/blocked period, not just the days rendered
       // in the current month, so cross-month conflicts are caught too.
@@ -178,7 +174,6 @@
       }
       conflictMessage = null;
       onDateSelect?.(startDate, day.dateStr);
-      selectingEndDate = false;
     }
   }
 
@@ -194,7 +189,6 @@
 
   function clearSelection() {
     onDateSelect?.('', null);
-    selectingEndDate = false;
     hoverDate = null;
     conflictMessage = null;
   }

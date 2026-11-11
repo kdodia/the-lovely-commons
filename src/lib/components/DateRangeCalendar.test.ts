@@ -93,6 +93,85 @@ describe('DateRangeCalendar', () => {
 		expect(onDateSelect).toHaveBeenLastCalledWith('2026-06-25', '2026-07-02');
 	});
 
+	// The parent can set the start itself (the item page's "Request to
+	// Borrow" presets tomorrow). The calendar must then take the next click
+	// as the end date; it used to ignore every click until "Clear".
+	describe('with a start date set by the parent', () => {
+		it('sets the end date on a click on a later day', async () => {
+			const onDateSelect = vi.fn();
+			render(DateRangeCalendar, { props: { onDateSelect, startDate: '2026-06-11' } });
+
+			await fireEvent.click(dayButton('Monday, June 15'));
+
+			expect(onDateSelect).toHaveBeenCalledTimes(1);
+			expect(onDateSelect).toHaveBeenCalledWith('2026-06-11', '2026-06-15');
+		});
+
+		it('allows the same day as the end', async () => {
+			const onDateSelect = vi.fn();
+			render(DateRangeCalendar, { props: { onDateSelect, startDate: '2026-06-11' } });
+
+			await fireEvent.click(dayButton('Thursday, June 11'));
+
+			expect(onDateSelect).toHaveBeenCalledWith('2026-06-11', '2026-06-11');
+		});
+
+		it('moves the start on a click on an earlier day', async () => {
+			const onDateSelect = vi.fn();
+			render(DateRangeCalendar, { props: { onDateSelect, startDate: '2026-06-15' } });
+
+			await fireEvent.click(dayButton('Thursday, June 11'));
+
+			expect(onDateSelect).toHaveBeenCalledWith('2026-06-11', null);
+		});
+
+		it('still refuses a range across a booked day', async () => {
+			const onDateSelect = vi.fn();
+			const bookedDates = [{ startDate: '2026-06-13', endDate: '2026-06-14' }];
+			render(DateRangeCalendar, { props: { onDateSelect, bookedDates, startDate: '2026-06-11' } });
+
+			await fireEvent.click(dayButton('Monday, June 15'));
+
+			expect(onDateSelect).not.toHaveBeenCalled();
+			expect(screen.getByRole('alert')).toHaveTextContent(/booked or blocked/i);
+		});
+
+		it('still refuses a range across a blocked day', async () => {
+			const onDateSelect = vi.fn();
+			const blockedDates = [{ startDate: '2026-06-13', endDate: '2026-06-13' }];
+			render(DateRangeCalendar, { props: { onDateSelect, blockedDates, startDate: '2026-06-11' } });
+
+			await fireEvent.click(dayButton('Monday, June 15'));
+
+			expect(onDateSelect).not.toHaveBeenCalled();
+			expect(screen.getByRole('alert')).toHaveTextContent(/booked or blocked/i);
+		});
+
+		it('takes the end once the parent clears and re-sets the start', async () => {
+			const onDateSelect = vi.fn();
+			const { rerender } = render(DateRangeCalendar, {
+				props: { onDateSelect, startDate: '2026-06-11', endDate: '2026-06-12' }
+			});
+			await rerender({ onDateSelect, startDate: '', endDate: '' });
+			await rerender({ onDateSelect, startDate: '2026-06-11', endDate: '' });
+
+			await fireEvent.click(dayButton('Monday, June 15'));
+
+			expect(onDateSelect).toHaveBeenCalledWith('2026-06-11', '2026-06-15');
+		});
+	});
+
+	it('starts a new range on a click when a range is complete', async () => {
+		const onDateSelect = vi.fn();
+		render(DateRangeCalendar, {
+			props: { onDateSelect, startDate: '2026-06-11', endDate: '2026-06-12' }
+		});
+
+		await fireEvent.click(dayButton('Monday, June 15'));
+
+		expect(onDateSelect).toHaveBeenCalledWith('2026-06-15', null);
+	});
+
 	it('marks booked days as disabled', () => {
 		render(DateRangeCalendar, {
 			props: { bookedDates: [{ startDate: '2026-06-18', endDate: '2026-06-19' }] }
