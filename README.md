@@ -106,29 +106,25 @@ Each item has permission levels:
 ```
 src/
 ├── lib/
-│   ├── components/
-│   │   ├── ItemCard.svelte       # Reusable item card component
-│   │   └── Toast.svelte          # Toast notification component
+│   ├── domain/                   # The rulebook: one file of lending rules per topic
+│   ├── store/                    # The Svelte store, localStorage persistence, derived lists
+│   ├── components/               # Interface pieces shared by more than one page
 │   ├── types.ts                  # TypeScript type definitions
-│   ├── mockData.ts               # Pre-populated sample data
-│   └── store.ts                  # Svelte stores with localStorage
-├── routes/
-│   ├── +layout.svelte            # Root layout with navigation
-│   ├── +page.svelte              # Browse page (home)
-│   ├── dashboard/
-│   │   └── +page.svelte          # Owner dashboard
-│   ├── items/[id]/
-│   │   └── +page.svelte          # Item detail page
-│   ├── my-items/
-│   │   └── +page.svelte          # User's items
-│   ├── tags/
-│   │   └── +page.svelte          # Tag management
+│   ├── dates.ts, constants.ts    # Date helpers and tunable numbers
+│   └── mockData.ts               # Pre-populated sample data
+├── routes/                       # One folder per page; a page's sections sit beside it
+│   ├── +layout.svelte            # Navigation and page shell
+│   ├── +page.svelte              # Browse (home)
+│   ├── dashboard/                # Requests, lending and borrowing
+│   ├── items/[id]/               # Item detail, and edit/
+│   ├── add-item/  my-items/  wishlist/  tags/
+│   ├── network/                  # Friends
 │   ├── profile/[id]/
-│   │   └── +page.svelte          # User profiles
 │   └── notifications/
-│       └── +page.svelte          # Notifications center
 └── app.css                       # Global styles and theme
 ```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit and how to change them.
 
 ## 👥 Sample Users
 

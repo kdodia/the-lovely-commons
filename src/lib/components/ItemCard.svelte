@@ -3,6 +3,7 @@
   import { appStore, getPermissionLevelInfo } from '$lib/store';
   import { goto } from '$app/navigation';
   import FallbackImage from './FallbackImage.svelte';
+  import RatingScore from './RatingScore.svelte';
   import { DESCRIPTION_PREVIEW_LENGTH } from '$lib/constants';
 
   interface Props {
@@ -47,8 +48,7 @@
       <span class="badge">{item.condition}</span>
 
       <div class="rating">
-        <span aria-hidden="true">⭐</span>
-        <span>{item.rating.toFixed(1)}</span>
+        <RatingScore value={item.rating} />
       </div>
     </div>
 

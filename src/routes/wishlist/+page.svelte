@@ -3,6 +3,7 @@
   import ItemCard from '$lib/components/ItemCard.svelte';
   import Toast from '$lib/components/Toast.svelte';
   import { useToast } from '$lib/useToast.svelte';
+  import PageHeader from '$lib/components/PageHeader.svelte';
 
   const toaster = useToast();
 
@@ -19,12 +20,7 @@
 
 <div class="wishlist-page fade-in">
   <div class="container">
-    <header class="page-header">
-      <div>
-        <h1 class="page-title">My Wishlist</h1>
-        <p class="page-subtitle">Items you've saved for later</p>
-      </div>
-    </header>
+    <PageHeader title="My Wishlist" subtitle="Items you've saved for later" shrinkTitle />
 
     {#if $currentUserWishlistItems.length > 0}
       <div class="wishlist-stats">
@@ -91,23 +87,6 @@
 <style>
   .wishlist-page {
     min-height: calc(100vh - 200px);
-  }
-
-  .page-header {
-    margin-bottom: 2rem;
-  }
-
-  .page-title {
-    font-size: 2rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 0 0 0.5rem 0;
-  }
-
-  .page-subtitle {
-    font-size: 1rem;
-    color: var(--text-secondary);
-    margin: 0;
   }
 
   .wishlist-stats {
@@ -261,10 +240,6 @@
   }
 
   @media (max-width: 768px) {
-    .page-title {
-      font-size: 1.5rem;
-    }
-
     .wishlist-stats {
       gap: 1rem;
     }

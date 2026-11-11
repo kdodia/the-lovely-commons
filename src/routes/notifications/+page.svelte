@@ -2,6 +2,8 @@
   import { appStore, currentUserNotifications } from '$lib/store';
   import { goto } from '$app/navigation';
   import type { Notification } from '$lib/types';
+  import EmptyState from '$lib/components/EmptyState.svelte';
+  import PageHeader from '$lib/components/PageHeader.svelte';
 
   function markAsRead(notificationId: string) {
     appStore.markNotificationAsRead(notificationId);
@@ -63,24 +65,14 @@
 
 <div class="notifications-page fade-in">
   <div class="container">
-    <header class="page-header">
-      <div>
-        <h1 class="page-title">Notifications</h1>
-        <p class="page-subtitle">
-          {unreadCount > 0 ? `${unreadCount} unread notification${unreadCount !== 1 ? 's' : ''}` : 'All caught up!'}
-        </p>
-      </div>
+    <PageHeader title="Notifications" subtitle={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount !== 1 ? 's' : ''}` : 'All caught up!'} stack="start">
       {#if unreadCount > 0}
         <button class="btn btn-secondary" onclick={markAllAsRead}> Mark All as Read </button>
       {/if}
-    </header>
+    </PageHeader>
 
     {#if $currentUserNotifications.length === 0}
-      <div class="empty-state">
-        <span class="empty-icon" aria-hidden="true">🔔</span>
-        <h3>No notifications yet</h3>
-        <p>When people request your items or respond to your requests, you'll see it here</p>
-      </div>
+      <EmptyState icon="🔔" title="No notifications yet" description="When people request your items or respond to your requests, you'll see it here" />
     {:else}
       <div class="notifications-list">
         {#each $currentUserNotifications as notification (notification.id)}
@@ -153,26 +145,6 @@
 </div>
 
 <style>
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-    gap: 1rem;
-  }
-
-  .page-title {
-    font-size: 2rem;
-    font-weight: 700;
-    margin: 0 0 0.5rem 0;
-  }
-
-  .page-subtitle {
-    font-size: 1rem;
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
   .notifications-list {
     display: flex;
     flex-direction: column;
@@ -237,34 +209,7 @@
     margin-top: 0.5rem;
   }
 
-  .empty-state {
-    text-align: center;
-    padding: 4rem 2rem;
-  }
-
-  .empty-icon {
-    font-size: 4rem;
-    display: block;
-    margin-bottom: 1rem;
-  }
-
-  .empty-state h3 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin: 0 0 0.5rem 0;
-  }
-
-  .empty-state p {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
   @media (max-width: 768px) {
-    .page-header {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-
     .notification-item {
       gap: 0.75rem;
       padding: 1rem;

@@ -1,12 +1,19 @@
 <script lang="ts">
   import { appStore, createId } from '$lib/store';
   import Toast from '$lib/components/Toast.svelte';
+  import Modal from '$lib/components/Modal.svelte';
   import type { Tag } from '$lib/types';
   import { useToast } from '$lib/useToast.svelte';
+  import EmptyState from '$lib/components/EmptyState.svelte';
+  import PageHeader from '$lib/components/PageHeader.svelte';
+  import CreateTagForm from './CreateTagForm.svelte';
+  import TagSidebar from './TagSidebar.svelte';
+  import TagDetails from './TagDetails.svelte';
 
   let showCreateForm = $state(false);
   let newTagName = $state('');
   let selectedTagId = $state<string | null>(null);
+  let showDeleteConfirm = $state(false);
   const toaster = useToast();
 
   let userTags = $derived(
@@ -48,42 +55,16 @@
     selectedTagId = tag.id;
   }
 
-  // Rename / delete
-  let editingName = $state(false);
-  let editedName = $state('');
-  let renameInput = $state<HTMLInputElement | undefined>();
-  let showDeleteConfirm = $state(false);
-  let deleteModalElement = $state<HTMLDivElement | undefined>();
-
-  function startRename() {
-    if (!selectedTag) return;
-    editedName = selectedTag.name;
-    editingName = true;
-  }
-
-  function saveRename() {
-    if (!selectedTagId) return;
-    const name = editedName.trim();
+  /** Returns false (after saying why) when the name can't be used, so the heading stays in edit mode. */
+  function renameTag(name: string): boolean {
+    if (!selectedTagId) return false;
     if (!name) {
       toaster.showToast('Tag name can\'t be empty', 'error');
-      return;
+      return false;
     }
     appStore.updateTag(selectedTagId, { name });
-    editingName = false;
     toaster.showToast('Tag renamed', 'success');
-  }
-
-  function cancelRename() {
-    editingName = false;
-  }
-
-  function handleRenameKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      saveRename();
-    } else if (e.key === 'Escape') {
-      cancelRename();
-    }
+    return true;
   }
 
   function confirmDelete() {
@@ -97,24 +78,6 @@
     selectedTagId = null;
     toaster.showToast('Tag deleted', 'success');
   }
-
-  function handleDeleteModalKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') showDeleteConfirm = false;
-  }
-
-  $effect(() => {
-    if (editingName && renameInput) renameInput.focus();
-  });
-
-  $effect(() => {
-    if (showDeleteConfirm && deleteModalElement) deleteModalElement.focus();
-  });
-
-  // Leaving edit mode when switching tags
-  $effect(() => {
-    selectedTagId;
-    editingName = false;
-  });
 
   function addItemToTag(itemId: string) {
     if (!selectedTagId) return;
@@ -131,153 +94,33 @@
 
 <div class="tags-page fade-in">
   <div class="container">
-    <header class="page-header">
-      <div>
-        <h1 class="page-title">Tag Collections</h1>
-        <p class="page-subtitle">Organize your items into custom collections</p>
-      </div>
+    <PageHeader title="Tag Collections" subtitle="Organize your items into custom collections">
       <button class="btn btn-primary" onclick={() => (showCreateForm = !showCreateForm)}>
         <span>+</span>
         <span>Create Tag</span>
       </button>
-    </header>
+    </PageHeader>
 
     {#if showCreateForm}
-      <div class="create-form card">
-        <h3>Create New Tag</h3>
-        <div class="form-row">
-          <input
-            type="text"
-            placeholder="Tag name (e.g., 'Camping Essentials', 'Party Items')"
-            bind:value={newTagName}
-            class="tag-input"
-          />
-          <button class="btn btn-primary" onclick={createTag} disabled={!newTagName.trim()}>
-            Create
-          </button>
-          <button class="btn btn-secondary" onclick={() => (showCreateForm = false)}>
-            Cancel
-          </button>
-        </div>
-      </div>
+      <CreateTagForm bind:name={newTagName} onCreate={createTag} onCancel={() => (showCreateForm = false)} />
     {/if}
 
     <div class="tags-layout">
-      <div class="tags-sidebar">
-        <h3>Your Tags ({userTags.length})</h3>
-        {#if userTags.length === 0}
-          <div class="empty-tags">
-            <p>No tags yet. Create your first tag to organize your items!</p>
-          </div>
-        {:else}
-          <div class="tags-list">
-            {#each userTags as tag}
-              <button
-                class="tag-item"
-                class:active={selectedTagId === tag.id}
-                onclick={() => (selectedTagId = tag.id)}
-              >
-                <span class="tag-icon" aria-hidden="true">🏷️</span>
-                <div class="tag-info">
-                  <span class="tag-name">{tag.name}</span>
-                  <span class="tag-count">{tag.itemIds.length} items</span>
-                </div>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
+      <TagSidebar tags={userTags} selectedId={selectedTagId} onSelect={(id) => (selectedTagId = id)} />
 
       <div class="tags-content">
         {#if selectedTag}
-          <div class="tag-details">
-            <div class="tag-heading">
-              {#if editingName}
-                <form class="rename-form" onsubmit={(e) => { e.preventDefault(); saveRename(); }}>
-                  <label for="rename-tag" class="sr-only">Tag name</label>
-                  <input
-                    id="rename-tag"
-                    type="text"
-                    class="rename-input"
-                    bind:value={editedName}
-                    bind:this={renameInput}
-                    onkeydown={handleRenameKeydown}
-                    maxlength="60"
-                  />
-                  <button type="submit" class="btn btn-primary btn-sm" disabled={!editedName.trim()}>Save</button>
-                  <button type="button" class="btn btn-secondary btn-sm" onclick={cancelRename}>Cancel</button>
-                </form>
-              {:else}
-                <h2>{selectedTag.name}</h2>
-                <div class="tag-heading-actions">
-                  <button class="btn btn-secondary btn-sm" onclick={startRename}>Rename</button>
-                  <button class="btn btn-secondary btn-sm btn-danger-text" onclick={() => (showDeleteConfirm = true)}>Delete</button>
-                </div>
-              {/if}
-            </div>
-
-            <div class="items-section">
-              <h3>Items in this collection ({tagItems.length})</h3>
-              {#if tagItems.length === 0}
-                <div class="empty-items">
-                  <p>No items in this tag yet. Add some from your items below!</p>
-                </div>
-              {:else}
-                <div class="items-grid">
-                  {#each tagItems as item}
-                    <div class="item-card-mini card">
-                      <a href="/items/{item.id}" class="item-link">
-                        <img src={item.imageUrl} alt={item.name} class="item-thumb" />
-                        <div class="item-mini-info">
-                          <span class="item-mini-name">{item.name}</span>
-                        </div>
-                      </a>
-                      <button
-                        class="remove-btn"
-                        onclick={() => removeItemFromTag(item.id)}
-                        aria-label="Remove {item.name} from tag"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-
-            <div class="add-items-section">
-              <h3>Add items to this collection</h3>
-              {#if availableItems.length === 0}
-                <p class="text-muted">All your items are already in this collection!</p>
-              {:else}
-                <div class="items-grid">
-                  {#each availableItems as item}
-                    <div class="item-card-mini card">
-                      <a href="/items/{item.id}" class="item-link">
-                        <img src={item.imageUrl} alt={item.name} class="item-thumb" />
-                        <div class="item-mini-info">
-                          <span class="item-mini-name">{item.name}</span>
-                        </div>
-                      </a>
-                      <button
-                        class="add-btn"
-                        onclick={() => addItemToTag(item.id)}
-                        aria-label="Add {item.name} to tag"
-                      >
-                        +
-                      </button>
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          </div>
+          <TagDetails
+            tag={selectedTag}
+            {tagItems}
+            {availableItems}
+            onRename={renameTag}
+            onDelete={() => (showDeleteConfirm = true)}
+            onAddItem={addItemToTag}
+            onRemoveItem={removeItemFromTag}
+          />
         {:else}
-          <div class="no-selection">
-            <span class="empty-icon" aria-hidden="true">🏷️</span>
-            <h3>Select a tag to view items</h3>
-            <p>Choose a tag from the sidebar to manage its items</p>
-          </div>
+          <EmptyState icon="🏷️" title="Select a tag to view items" description="Choose a tag from the sidebar to manage its items" />
         {/if}
       </div>
     </div>
@@ -285,17 +128,13 @@
 </div>
 
 {#if showDeleteConfirm && selectedTag}
-  <!-- svelte-ignore a11y_click_events_have_key_events - Modal overlay has onkeydown handler for Escape key -->
-  <div class="modal-overlay" onclick={() => (showDeleteConfirm = false)} onkeydown={handleDeleteModalKeydown} role="presentation">
-    <div class="modal-content" bind:this={deleteModalElement} onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="delete-tag-title" tabindex="-1">
-      <h2 id="delete-tag-title">Delete "{selectedTag.name}"?</h2>
-      <p>The collection goes away; the {selectedTag.itemIds.length} {selectedTag.itemIds.length === 1 ? 'item' : 'items'} in it stay in your library.</p>
-      <div class="modal-actions">
-        <button class="btn btn-error" onclick={confirmDelete}>Delete Tag</button>
-        <button class="btn btn-secondary" onclick={() => (showDeleteConfirm = false)}>Cancel</button>
-      </div>
-    </div>
-  </div>
+  <Modal title={`Delete "${selectedTag.name}"?`} size="sm" onClose={() => (showDeleteConfirm = false)}>
+    <p>The collection goes away; the {selectedTag.itemIds.length} {selectedTag.itemIds.length === 1 ? 'item' : 'items'} in it stay in your library.</p>
+    {#snippet actions()}
+      <button class="btn btn-error" onclick={confirmDelete}>Delete Tag</button>
+      <button class="btn btn-secondary" onclick={() => (showDeleteConfirm = false)}>Cancel</button>
+    {/snippet}
+  </Modal>
 {/if}
 
 {#if toaster.toast}
@@ -303,202 +142,10 @@
 {/if}
 
 <style>
-  .tag-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    flex-wrap: wrap;
-    margin-bottom: 1.5rem;
-  }
-
-  .tag-heading h2 {
-    margin: 0;
-  }
-
-  .tag-heading-actions {
-    display: flex;
-    gap: 0.5rem;
-  }
-
-  .btn-danger-text {
-    color: var(--error);
-  }
-
-  .rename-form {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    flex: 1;
-    flex-wrap: wrap;
-  }
-
-  .rename-input {
-    flex: 1;
-    min-width: 200px;
-    font-size: 1.25rem;
-    font-weight: 600;
-  }
-
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-  }
-
-  .btn-error {
-    background-color: var(--error);
-    color: white;
-  }
-
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 1rem;
-  }
-
-  .modal-content {
-    background: var(--background);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
-    max-width: 440px;
-    width: 100%;
-    padding: 2rem;
-  }
-
-  .modal-content h2 {
-    margin: 0 0 0.75rem 0;
-    font-size: 1.375rem;
-  }
-
-  .modal-content p {
-    margin: 0 0 1.5rem 0;
-    color: var(--text-secondary);
-  }
-
-  .modal-actions {
-    display: flex;
-    gap: 0.75rem;
-    justify-content: flex-end;
-  }
-
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-    gap: 1rem;
-  }
-
-  .page-title {
-    font-size: 2rem;
-    font-weight: 700;
-    margin: 0 0 0.5rem 0;
-  }
-
-  .page-subtitle {
-    font-size: 1rem;
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  .create-form {
-    padding: 1.5rem;
-    margin-bottom: 2rem;
-  }
-
-  .create-form h3 {
-    margin: 0 0 1rem 0;
-    font-size: 1.125rem;
-  }
-
-  .form-row {
-    display: flex;
-    gap: 1rem;
-  }
-
-  .tag-input {
-    flex: 1;
-  }
-
   .tags-layout {
     display: grid;
     grid-template-columns: 300px 1fr;
     gap: 2rem;
-  }
-
-  .tags-sidebar {
-    background-color: var(--background);
-    border-radius: var(--radius-lg);
-    padding: 1.5rem;
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--border);
-    height: fit-content;
-  }
-
-  .tags-sidebar h3 {
-    margin: 0 0 1rem 0;
-    font-size: 1.125rem;
-  }
-
-  .tags-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .tag-item {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.875rem;
-    border-radius: var(--radius);
-    background-color: transparent;
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all var(--transition);
-    text-align: left;
-  }
-
-  .tag-item:hover {
-    background-color: var(--surface);
-    border-color: var(--border);
-  }
-
-  .tag-item.active {
-    background-color: rgba(16, 185, 129, 0.1);
-    border-color: var(--primary);
-  }
-
-  .tag-icon {
-    font-size: 1.5rem;
-  }
-
-  .tag-info {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .tag-name {
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
-  .tag-count {
-    font-size: 0.75rem;
-    color: var(--text-muted);
   }
 
   .tags-content {
@@ -509,156 +156,9 @@
     border: 1px solid var(--border);
   }
 
-  .tag-details h2 {
-    margin: 0;
-    font-size: 1.75rem;
-  }
-
-  .items-section,
-  .add-items-section {
-    margin-bottom: 3rem;
-  }
-
-  .items-section h3,
-  .add-items-section h3 {
-    margin: 0 0 1rem 0;
-    font-size: 1.125rem;
-    font-weight: 600;
-  }
-
-  .items-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 1rem;
-  }
-
-  .item-card-mini {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    position: relative;
-  }
-
-  .item-link {
-    display: flex;
-    flex-direction: column;
-    text-decoration: none;
-    color: inherit;
-    flex: 1;
-    transition: opacity var(--transition);
-  }
-
-  .item-link:hover {
-    opacity: 0.9;
-  }
-
-  .item-thumb {
-    width: 100%;
-    height: 150px;
-    object-fit: cover;
-  }
-
-  .item-mini-info {
-    padding: 0.75rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .item-mini-name {
-    font-size: 0.875rem;
-    font-weight: 500;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .add-btn,
-  .remove-btn {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.25rem;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all var(--transition);
-    flex-shrink: 0;
-    z-index: 10;
-    box-shadow: var(--shadow-md);
-  }
-
-  .add-btn {
-    background-color: var(--primary);
-    color: white;
-  }
-
-  .add-btn:hover {
-    background-color: var(--primary-dark);
-    transform: scale(1.1);
-  }
-
-  .remove-btn {
-    background-color: var(--error);
-    color: white;
-  }
-
-  .remove-btn:hover {
-    background-color: #dc2626;
-    transform: scale(1.1);
-  }
-
-  .empty-tags,
-  .empty-items {
-    padding: 2rem 1rem;
-    text-align: center;
-    color: var(--text-secondary);
-  }
-
-  .no-selection {
-    text-align: center;
-    padding: 4rem 2rem;
-  }
-
-  .empty-icon {
-    font-size: 4rem;
-    display: block;
-    margin-bottom: 1rem;
-  }
-
-  .no-selection h3 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin: 0 0 0.5rem 0;
-  }
-
-  .no-selection p {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  .text-muted {
-    color: var(--text-secondary);
-  }
-
   @media (max-width: 768px) {
     .tags-layout {
       grid-template-columns: 1fr;
-    }
-
-    .items-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .form-row {
-      flex-direction: column;
     }
   }
 </style>

@@ -3,6 +3,8 @@
   import { page } from '$app/stores';
   import { appStore, currentUser, unreadNotificationsCount, STORAGE_KEY } from '$lib/store';
   import FallbackImage from '$lib/components/FallbackImage.svelte';
+  import Modal from '$lib/components/Modal.svelte';
+  import Avatar from '$lib/components/Avatar.svelte';
 
   let { children } = $props();
 
@@ -16,7 +18,6 @@
   ];
 
   let showResetConfirm = $state(false);
-  let resetModalElement = $state<HTMLDivElement | undefined>();
 
   function handleResetData() {
     showResetConfirm = true;
@@ -31,20 +32,6 @@
   function cancelReset() {
     showResetConfirm = false;
   }
-
-  // Handle escape key for modal
-  function handleModalKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      cancelReset();
-    }
-  }
-
-  // Focus modal when it opens
-  $effect(() => {
-    if (showResetConfirm && resetModalElement) {
-      resetModalElement.focus();
-    }
-  });
 
   // Announce loans that have gone overdue: on load, and when a tab left open
   // overnight becomes visible again. Effects only run in the browser.
@@ -153,9 +140,7 @@
                       aria-checked={user.id === $currentUser.id}
                       onclick={() => switchUser(user.id)}
                     >
-                      <span class="menu-avatar">
-                        <FallbackImage src={user.profilePic} alt="" fallbackType="avatar" />
-                      </span>
+                      <Avatar src={user.profilePic} alt="" size="1.75rem" fallback />
                       <span class="menu-name">{user.name}</span>
                       {#if user.id === $currentUser.id}
                         <span class="menu-check" aria-hidden="true">✓</span>
@@ -178,17 +163,13 @@
 </div>
 
 {#if showResetConfirm}
-  <!-- svelte-ignore a11y_click_events_have_key_events - Modal overlay has onkeydown handler for Escape key -->
-  <div class="modal-overlay" onclick={cancelReset} onkeydown={handleModalKeydown} role="presentation">
-    <div class="modal-content" bind:this={resetModalElement} onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="reset-modal-title" tabindex="-1">
-      <h2 id="reset-modal-title">Reset App Data?</h2>
-      <p>This will clear all data and reload the app with mock data. This action cannot be undone.</p>
-      <div class="modal-actions">
-        <button class="btn btn-error" onclick={confirmReset}>Reset Data</button>
-        <button class="btn btn-secondary" onclick={cancelReset}>Cancel</button>
-      </div>
-    </div>
-  </div>
+  <Modal title="Reset App Data?" onClose={cancelReset}>
+    <p>This will clear all data and reload the app with mock data. This action cannot be undone.</p>
+    {#snippet actions()}
+      <button class="btn btn-error" onclick={confirmReset}>Reset Data</button>
+      <button class="btn btn-secondary" onclick={cancelReset}>Cancel</button>
+    {/snippet}
+  </Modal>
 {/if}
 
 <style>
@@ -421,15 +402,6 @@
     background-color: rgba(16, 185, 129, 0.1);
   }
 
-  .menu-avatar {
-    display: block;
-    width: 1.75rem;
-    height: 1.75rem;
-    border-radius: 50%;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-
   .menu-name {
     flex: 1;
     font-size: 0.875rem;
@@ -454,57 +426,6 @@
   .main-content {
     flex: 1;
     padding: 2rem 0;
-  }
-
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    animation: fadeIn 0.2s ease-out;
-  }
-
-  .modal-content {
-    background-color: var(--background);
-    padding: 2rem;
-    border-radius: var(--radius-lg);
-    max-width: 500px;
-    width: 90%;
-    box-shadow: var(--shadow-lg);
-    animation: slideUp 0.2s ease-out;
-  }
-
-  .modal-content h2 {
-    margin: 0 0 1rem 0;
-    font-size: 1.5rem;
-    color: var(--text-primary);
-  }
-
-  .modal-content p {
-    margin: 0 0 1.5rem 0;
-    color: var(--text-secondary);
-    line-height: 1.5;
-  }
-
-  .modal-actions {
-    display: flex;
-    gap: 1rem;
-    justify-content: flex-end;
-  }
-
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
   }
 
   @keyframes slideUp {
@@ -581,14 +502,6 @@
 
     .main-content {
       padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
-    }
-
-    .modal-content {
-      padding: 1.5rem;
-    }
-
-    .modal-actions {
-      flex-direction: column;
     }
   }
 </style>
