@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { appStore } from '$lib/store';
 import type { BorrowRequest } from '$lib/types';
 import { createTestState, createTestItem, createLifecycleRequest, confirmBothSides } from '../../test/fixtures';
-import { approveRequest, cancelRequest, nextNudgeDate } from './requests';
+import { approveRequest, cancelRequest, nextNudgeDate, nudgeRequest } from './requests';
+import { addDays, toLocalISODate } from '$lib/dates';
+import { NUDGE_DELAY_DAYS } from '$lib/constants';
 
 describe('appStore actions', () => {
 	beforeEach(() => {
@@ -97,17 +99,114 @@ describe('appStore actions', () => {
 				startDate: '2024-01-15',
 				endDate: '2024-01-20',
 				status: 'pending',
-				createdAt: new Date().toISOString()
+				// Old enough that the first nudge is allowed
+				createdAt: addDays(new Date(), -NUDGE_DELAY_DAYS).toISOString()
 			};
 			appStore.replaceState(createTestState({ items: [item], borrowRequests: [request] }));
 
-			appStore.nudgeRequest('req1');
+			const result = appStore.nudgeRequest('req1');
 
+			expect(result).toEqual({ ok: true });
 			const state = get(appStore);
 			expect(state.borrowRequests[0].lastNudgedAt).toBeDefined();
 			expect(state.notifications).toHaveLength(1);
 			expect(state.notifications[0].type).toBe('request-nudge');
 		});
+	});
+});
+
+describe('nudgeRequest cooldown', () => {
+	// Request made Monday 2030-01-07 at 18:00 local; NUDGE_DELAY_DAYS is 3.
+	const createdAt = new Date(2030, 0, 7, 18, 0).toISOString();
+
+	function stateAt(overrides: Partial<BorrowRequest> = {}) {
+		return createTestState({
+			items: [createTestItem({ lenderId: 'user2' })],
+			borrowRequests: [createLifecycleRequest({ createdAt, ...overrides })]
+		});
+	}
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('refuses the first nudge before the delay since the request, naming the day', () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2030, 0, 9, 23, 59));
+		const state = stateAt();
+
+		const { state: next, result } = nudgeRequest(state, 'req1');
+
+		expect(next).toBe(state);
+		expect(result).toEqual({ ok: false, error: expect.stringContaining('Jan 10') });
+	});
+
+	it('allows the first nudge on that day, even before the hour it was made', () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2030, 0, 10, 8, 0));
+
+		const { state: next, result } = nudgeRequest(stateAt(), 'req1');
+
+		expect(result).toEqual({ ok: true });
+		expect(next.borrowRequests[0].lastNudgedAt).toBe(new Date(2030, 0, 10, 8, 0).toISOString());
+		expect(next.notifications.map((n) => [n.type, n.userId])).toEqual([['request-nudge', 'user2']]);
+	});
+
+	it('refuses another nudge until the delay after the last one', () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2030, 0, 10, 8, 0));
+		const nudged = nudgeRequest(stateAt(), 'req1').state;
+
+		vi.setSystemTime(new Date(2030, 0, 12, 22, 0));
+		const early = nudgeRequest(nudged, 'req1');
+		expect(early.state).toBe(nudged);
+		expect(early.result).toEqual({
+			ok: false,
+			error: 'You already sent a reminder — you can send another on Jan 13'
+		});
+
+		vi.setSystemTime(new Date(2030, 0, 13, 7, 0));
+		expect(nudgeRequest(nudged, 'req1').result).toEqual({ ok: true });
+	});
+
+	it('refuses anyone but the borrower', () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2030, 0, 20, 12, 0));
+		for (const actor of ['user2', 'user3']) {
+			const state = { ...stateAt(), currentUserId: actor };
+			const { state: next, result } = nudgeRequest(state, 'req1');
+			expect(next).toBe(state);
+			expect(result).toEqual({ ok: false, error: 'Only the person who asked can send a reminder' });
+		}
+	});
+
+	it('refuses a request that is no longer pending', () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2030, 0, 20, 12, 0));
+		expect(nudgeRequest(stateAt({ status: 'approved' }), 'req1').result).toEqual({
+			ok: false,
+			error: 'Only pending requests can be nudged'
+		});
+	});
+
+	// Spring-forward changes: NZ (run with TZ=Pacific/Auckland) on
+	// 2030-09-29, the US on 2030-03-10, the EU on 2030-03-31. Across one, the
+	// three calendar days are 71 hours, which elapsed-time counting got wrong.
+	it.each([
+		['Pacific/Auckland', [2030, 8, 27]],
+		['America/*', [2030, 2, 8]],
+		['Europe/*', [2030, 2, 29]]
+	] as const)('counts calendar days across a daylight-saving change (%s)', (_zone, [y, m, d]) => {
+		vi.useFakeTimers();
+		const made = new Date(y, m, d, 9, 0);
+		vi.setSystemTime(new Date(y, m, d + NUDGE_DELAY_DAYS, 8, 30));
+		const state = stateAt({ createdAt: made.toISOString() });
+
+		expect(nextNudgeDate(state.borrowRequests[0])).toBe(toLocalISODate(new Date(y, m, d + NUDGE_DELAY_DAYS)));
+		expect(nudgeRequest(state, 'req1').result).toEqual({ ok: true });
+
+		vi.setSystemTime(new Date(y, m, d + NUDGE_DELAY_DAYS - 1, 23, 30));
+		expect(nudgeRequest(state, 'req1').result.ok).toBe(false);
 	});
 });
 

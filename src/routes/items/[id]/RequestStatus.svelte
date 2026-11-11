@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { appStore } from '$lib/store';
+  import { appStore, nextNudgeDate } from '$lib/store';
   import type { BorrowRequest } from '$lib/types';
   import type { ToastType } from '$lib/useToast.svelte';
-  import { NUDGE_DELAY_DAYS } from '$lib/constants';
-  import { addDays, formatDisplayDate } from '$lib/dates';
+  import { DATE_FORMAT_OPTIONS } from '$lib/constants';
+  import { daysBetween, formatDisplayDate, todayLocalISO } from '$lib/dates';
 
   /**
    * The borrower's own pending request: what they sent, who it is waiting on,
@@ -17,33 +17,12 @@
 
   let { request, lenderName, onToast }: Props = $props();
 
-  // The nudge cooldown counts from the last nudge (or the request itself if
-  // never nudged), so a long-ignored request can be nudged again after
-  // NUDGE_DELAY_DAYS rather than exactly once ever.
-  //
-  // This deliberately is not `nextNudgeDate` from '$lib/store': that one
-  // disagrees with this rule across a spring-forward DST change, where the
-  // elapsed-time floor below counts one day too few.
-  let daysSinceLastNudgeEvent = $derived.by(() => {
-    const reference = request.lastNudgedAt ?? request.createdAt;
-
-    // Use day boundaries for consistent calculation across timezones
-    const referenceDay = new Date(reference).setHours(0, 0, 0, 0);
-    const today = new Date().setHours(0, 0, 0, 0);
-    return Math.floor((today - referenceDay) / (1000 * 60 * 60 * 24));
-  });
-
-  let canNudge = $derived(daysSinceLastNudgeEvent >= NUDGE_DELAY_DAYS);
-
-  // Days remaining until nudge is available
-  let daysUntilNudge = $derived(canNudge ? null : NUDGE_DELAY_DAYS - daysSinceLastNudgeEvent);
-
-  // The date when nudge becomes available
-  let nudgeAvailableDate = $derived.by(() => {
-    if (canNudge) return null;
-    const reference = request.lastNudgedAt ?? request.createdAt;
-    return addDays(new Date(reference), NUDGE_DELAY_DAYS);
-  });
+  // The day the domain allows the next nudge (from the request, or from the
+  // last nudge); the store refuses one before it, so the button agrees.
+  let nudgeAvailableOn = $derived(nextNudgeDate(request));
+  let today = $derived(todayLocalISO());
+  let canNudge = $derived(today >= nudgeAvailableOn);
+  let daysUntilNudge = $derived(daysBetween(today, nudgeAvailableOn));
 
   function nudgeLender() {
     const result = appStore.nudgeRequest(request.id);
@@ -91,17 +70,14 @@
         day: 'numeric'
       })}</span>
     </div>
-  {:else if daysUntilNudge !== null && nudgeAvailableDate}
+  {:else}
     <div class="nudge-waiting">
       <span class="nudge-waiting-icon">⏳</span>
       <p class="nudge-waiting-text">
         {#if daysUntilNudge === 1}
           Friendly reminder available tomorrow
         {:else}
-          Friendly reminder available in {daysUntilNudge} days ({nudgeAvailableDate.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric'
-          })})
+          Friendly reminder available in {daysUntilNudge} days ({formatDisplayDate(nudgeAvailableOn, DATE_FORMAT_OPTIONS.short)})
         {/if}
       </p>
     </div>

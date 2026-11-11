@@ -19,13 +19,14 @@
  *   is declined, not cancelled). Active loans can't be cancelled. The other
  *   party is notified; cancelling an approved request frees the item if no
  *   other approved/active request holds it, and tells wishlist subscribers.
- * - nudge: only from pending, at most once per NUDGE_DELAY_DAYS (measured
- *   in elapsed time from the last nudge; the first nudge is not limited
- *   here). The lender is reminded. The actor is not checked.
+ * - nudge: only the borrower, only from pending, and not before
+ *   `nextNudgeDate`: NUDGE_DELAY_DAYS calendar days after the request was
+ *   made, or after the last nudge once there has been one, counted in local
+ *   days. The lender is reminded.
  */
 import type { AppState, BorrowRequest, Notification } from '../types';
-import { addDays, rangesOverlap, toLocalISODate } from '../dates';
-import { NUDGE_DELAY_DAYS } from '../constants';
+import { addDays, formatDisplayDate, rangesOverlap, toLocalISODate, todayLocalISO } from '../dates';
+import { DATE_FORMAT_OPTIONS, NUDGE_DELAY_DAYS } from '../constants';
 import { accept, reject, type Transition } from './transition';
 import { patchById } from './lists';
 import { appendNotifications, createNotification } from './notifications';
@@ -217,19 +218,28 @@ export function cancelRequest(state: AppState, requestId: string): Transition {
   });
 }
 
-// Nudge lender about pending request
+/**
+ * The borrower reminds the lender about a pending request. Limited to one
+ * reminder per NUDGE_DELAY_DAYS (see `nextNudgeDate`) so it stays a nudge.
+ */
 export function nudgeRequest(state: AppState, requestId: string): Transition {
   const request = state.borrowRequests.find((r) => r.id === requestId);
   if (!request) return reject(state, 'Request not found');
 
+  if (request.borrowerId !== state.currentUserId) {
+    return reject(state, 'Only the person who asked can send a reminder');
+  }
   if (request.status !== 'pending') return reject(state, 'Only pending requests can be nudged');
 
-  if (request.lastNudgedAt) {
-    const daysSinceNudge =
-      (Date.now() - new Date(request.lastNudgedAt).getTime()) / (1000 * 60 * 60 * 24);
-    if (daysSinceNudge < NUDGE_DELAY_DAYS) {
-      return reject(state, `You can send another reminder in ${NUDGE_DELAY_DAYS} days`);
-    }
+  const nextAllowed = nextNudgeDate(request);
+  if (todayLocalISO() < nextAllowed) {
+    const on = formatDisplayDate(nextAllowed, DATE_FORMAT_OPTIONS.short);
+    return reject(
+      state,
+      request.lastNudgedAt
+        ? `You already sent a reminder — you can send another on ${on}`
+        : `It's a little early — you can send a reminder on ${on}`
+    );
   }
 
   const item = state.items.find((i) => i.id === request.itemId);
@@ -256,11 +266,11 @@ export function nudgeRequest(state: AppState, requestId: string): Transition {
 }
 
 /**
- * The local day ('YYYY-MM-DD') from which the item page offers the borrower
- * a nudge: NUDGE_DELAY_DAYS calendar days after the last nudge, or after the
- * request was made if it was never nudged. Mirrors the cooldown the item
- * page currently computes for itself, which is stricter than nudgeRequest
- * (that only limits repeat nudges, and counts elapsed hours).
+ * The local day ('YYYY-MM-DD') from which the borrower may nudge:
+ * NUDGE_DELAY_DAYS calendar days after the last nudge, or after the request
+ * was made if it was never nudged. Calendar days, so a daylight-saving
+ * change in between neither adds nor loses a day. `nudgeRequest` enforces
+ * it and the item page shows it.
  */
 export function nextNudgeDate(request: BorrowRequest): string {
   const reference = request.lastNudgedAt ?? request.createdAt;

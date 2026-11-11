@@ -76,9 +76,10 @@ export function approveRequest(state: AppState, requestId: string): Transition {
 | active | `confirmReturn` by both | borrower and lender | completed (moves to history) |
 
 While pending, approved or active, either person may `sendRequestMessage`.
-While pending, the borrower may `nudgeRequest`. While active and past its end
-date a loan is overdue: the lender may `sendReturnReminder`, and
-`notifyOverdueLoans` tells both people once.
+While pending, the borrower may `nudgeRequest`, once per `NUDGE_DELAY_DAYS`
+calendar days from the request or the last nudge (`nextNudgeDate`). While
+active and past its end date a loan is overdue: the lender may
+`sendReturnReminder`, and `notifyOverdueLoans` tells both people once.
 
 ## The store: `src/lib/store/`
 
@@ -140,8 +141,8 @@ the rule cannot disagree.
 The prototype trusts its own interface. These are fine for one person
 clicking through, and each must be closed in a real multi-user system:
 
-- **Actor checks are incomplete.** `approveRequest`, `denyRequest` and
-  `nudgeRequest` do not check who is acting; nor do adding/updating items,
+- **Actor checks are incomplete.** `approveRequest` and `denyRequest` do
+  not check who is acting; nor do adding/updating items,
   editing tags, accepting friend requests, or marking notifications read.
   Several friend actions take user ids as arguments instead of using the
   actor.
@@ -151,12 +152,6 @@ clicking through, and each must be closed in a real multi-user system:
   item page enforces these before calling it.
 - **Approval makes the whole item unavailable**, even for a loan weeks away,
   so other dates cannot be requested until it completes.
-- **The nudge cooldown is counted two ways**: the item page
-  (`RequestStatus.svelte`) counts elapsed days from the request's creation
-  or last nudge, and is a day late across a daylight-saving change; the
-  store's `nudgeRequest` only limits repeat nudges, in elapsed hours.
-  `nextNudgeDate` (calendar days) is the intended single rule; neither uses
-  it yet.
 - **Two exceptions to "pages do not decide rules"** remain: the item page
   decides whether a request may be made (`BorrowAction`/`RequestForm`), and
   `LoanCard` offers Cancel only on approved loans although the rule also

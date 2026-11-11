@@ -135,10 +135,6 @@ for a real, federated system.
 1. **Rough edges testers may hit** (found during the restructure, not fixed):
    - Approving a request marks the whole item unavailable, even for a loan
      weeks away, so nobody can request other dates meanwhile.
-   - The nudge cooldown is counted differently by the item page
-     (`RequestStatus.svelte`) and the store (`nudgeRequest`); the page's
-     version is also a day late across a daylight-saving change.
-     `nextNudgeDate` in `domain/requests.ts` is the intended single rule.
 2. **Known gaps for the spec** are listed in `ARCHITECTURE.md` (actor
    checks, request validation, cross-tab sync, identity).
 3. **Unread messages.** A thread only signals new messages through the

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import RequestStatus from './RequestStatus.svelte';
 import { appStore } from '$lib/store';
@@ -43,6 +43,10 @@ describe('RequestStatus', () => {
 		appStore.replaceState(stateWith(request()));
 	});
 
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it('summarises the request and who it is waiting on', () => {
 		renderStatus(request());
 
@@ -60,6 +64,37 @@ describe('RequestStatus', () => {
 		renderStatus(request({ createdAt: daysAgo(0) }));
 		expect(screen.getByText(/Friendly reminder available in 3 days/)).toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: /Send Friendly Reminder/ })).not.toBeInTheDocument();
+	});
+
+	it('names the day the reminder becomes available, counted in calendar days', () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2030, 0, 10, 9, 0));
+		// Made late the evening before: three calendar days on is Jan 12,
+		// so two days from today.
+		renderStatus(request({ createdAt: new Date(2030, 0, 9, 23, 30).toISOString() }));
+		expect(screen.getByText('Friendly reminder available in 2 days (Jan 12)')).toBeInTheDocument();
+	});
+
+	it('offers the reminder on the day across a daylight-saving change', () => {
+		vi.useFakeTimers();
+		// NZ clocks go forward on 2030-09-29 (run with TZ=Pacific/Auckland);
+		// counting elapsed time made this a day late.
+		vi.setSystemTime(new Date(2030, 8, 30, 0, 10));
+		renderStatus(request({ createdAt: new Date(2030, 8, 27, 0, 30).toISOString() }));
+		expect(screen.getByRole('button', { name: /Send Friendly Reminder/ })).toBeInTheDocument();
+	});
+
+	it('shows the store\'s dated refusal if the reminder is sent too early', async () => {
+		const { onToast } = renderStatus(request({ createdAt: daysAgo(5) }));
+		// Someone already nudged today (e.g. in another tab) before this click
+		appStore.replaceState(stateWith(request({ createdAt: daysAgo(5), lastNudgedAt: daysAgo(0) })));
+
+		await fireEvent.click(screen.getByRole('button', { name: /Send Friendly Reminder/ }));
+
+		expect(onToast).toHaveBeenCalledWith(
+			expect.stringMatching(/^You already sent a reminder — you can send another on [A-Z][a-z]{2} \d+$/),
+			'error'
+		);
 	});
 
 	it('says "tomorrow" when the reminder is one day away', () => {
