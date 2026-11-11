@@ -14,7 +14,7 @@ export function createLoanActions(notify: Notify) {
 
   function approve(requestId: string) {
     const result = appStore.approveRequest(requestId);
-    if (result.ok) notify('Request approved! The item is now reserved.', 'success');
+    if (result.ok) notify('Request approved! Those dates are now reserved.', 'success');
     else notify(result.error, 'error');
   }
 

@@ -67,13 +67,19 @@ export function approveRequest(state: AppState, requestId: string): Transition {
 
 | From | Action | Who | To |
 |---|---|---|---|
-| (none) | `createBorrowRequest` | borrower | pending |
-| pending | `approveRequest` | lender | approved (item becomes unavailable) |
+| (none) | `createBorrowRequest` | borrower (`canRequestItem`) | pending |
+| pending | `approveRequest` | lender | approved (dates reserved) |
 | pending | `denyRequest` | lender | denied |
 | pending | `cancelRequest` | borrower | cancelled |
-| approved | `cancelRequest` | borrower or lender | cancelled (item freed) |
-| approved | `confirmPickup` by both | borrower and lender | active |
-| active | `confirmReturn` by both | borrower and lender | completed (moves to history) |
+| approved | `cancelRequest` | borrower or lender | cancelled (dates freed) |
+| approved | `confirmPickup` by both | borrower and lender | active (item unavailable) |
+| active | `confirmReturn` by both | borrower and lender | completed (moves to history; item available) |
+
+`item.available` means the item is at home now: it is false only while a
+loan of it is active. Requests are governed by dates instead: anyone who can
+see the item, does not own it and has no open request for it may ask for
+dates that do not overlap its blocked dates or an approved/active loan
+(`hasDateConflict`), whether or not it is out today.
 
 While pending, approved or active, either person may `sendRequestMessage`.
 While pending, the borrower may `nudgeRequest`, once per `NUDGE_DELAY_DAYS`
@@ -146,16 +152,9 @@ clicking through, and each must be closed in a real multi-user system:
   editing tags, accepting friend requests, or marking notifications read.
   Several friend actions take user ids as arguments instead of using the
   actor.
-- **`createBorrowRequest` stores the request as given.** It does not check
-  that the borrower is the actor, can see the item, differs from the lender,
-  or that the lender owns the item, nor date order or the initial status. The
-  item page enforces these before calling it.
-- **Approval makes the whole item unavailable**, even for a loan weeks away,
-  so other dates cannot be requested until it completes.
-- **Two exceptions to "pages do not decide rules"** remain: the item page
-  decides whether a request may be made (`BorrowAction`/`RequestForm`), and
-  `LoanCard` offers Cancel only on approved loans although the rule also
-  lets a borrower cancel a pending request.
+- **One exception to "pages do not decide rules"** remains: `LoanCard`
+  offers Cancel only on approved loans although the rule also lets a
+  borrower cancel a pending request.
 - **Cross-tab sync replaces the state wholesale**, skipping `migrateState()`
   and switching the acting user in every open tab.
 - **Ratings**: the first borrower review replaces an item's seeded rating;

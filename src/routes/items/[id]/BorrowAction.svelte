@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { appStore } from '$lib/store';
+  import { appStore, canRequestItem } from '$lib/store';
   import type { Item, User } from '$lib/types';
   import type { ToastType } from '$lib/useToast.svelte';
   import RequestStatus from './RequestStatus.svelte';
@@ -8,7 +8,8 @@
   /**
    * The call-to-action under the item details, for a viewer who may see the
    * item: their pending request if they already have one, otherwise the
-   * request form when they are allowed to borrow it, otherwise nothing.
+   * request form when they may request it (`canRequestItem`), otherwise
+   * nothing.
    */
   interface Props {
     item: Item;
@@ -28,8 +29,6 @@
     onToast
   }: Props = $props();
 
-  let currentUser = $derived($appStore.users.find((u) => u.id === $appStore.currentUserId));
-
   // Has the current user already requested this item?
   let existingRequest = $derived(
     $appStore.borrowRequests.find(
@@ -40,10 +39,10 @@
     )
   );
 
-  // The page has already checked the viewer may see the item.
-  let canRequest = $derived(
-    currentUser && item.lenderId !== $appStore.currentUserId && item.available && !existingRequest
-  );
+  // The domain decides (the same rule createBorrowRequest enforces). Whether
+  // the item is out today does not matter: the calendar shows which dates
+  // are taken.
+  let canRequest = $derived(canRequestItem($appStore, item.id, $appStore.currentUserId));
 </script>
 
 {#if existingRequest}

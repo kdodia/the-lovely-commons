@@ -4,18 +4,19 @@
  * - Pickup: allowed only while the request is approved, by its borrower or
  *   lender, once each (`pickupConfirmedBy`). The first confirmation tells
  *   the other party to confirm on their side; the second makes the loan
- *   active.
+ *   active and marks the item out (`available: false`).
  * - Return: allowed only while the loan is active, by its borrower or
  *   lender, once each (`returnConfirmedBy`). The lender may pass feedback (a
  *   rating of the borrower from MIN_RATING to MAX_RATING, a note, the item's
  *   condition); it is kept whichever side confirms first, and anything the
  *   borrower passes is ignored. The first confirmation tells the other party
  *   to confirm on their side; the second completes the loan.
- * - Completing a loan moves it to history, frees the item unless another
- *   approved/active request still holds it, updates the item's condition and
- *   borrow count, both users' counters and the borrower's rating, asks the
- *   borrower to review the item, and (if the item was unavailable and is now
- *   free) tells wishlist subscribers other than the borrower.
+ * - Completing a loan moves it to history, marks the item back
+ *   (`available: true`) unless another loan of it is still active, updates
+ *   the item's condition and borrow count, both users' counters and the
+ *   borrower's rating, asks the borrower to review the item, and (if the
+ *   item was out and is now back) tells wishlist subscribers other than the
+ *   borrower. Approved loans for later dates do not keep it out.
  */
 import type { AppState, BorrowHistory, BorrowRequest, LenderReturnFeedback, Notification } from '../types';
 import { todayLocalISO } from '../dates';
@@ -24,7 +25,7 @@ import { accept, reject, type Transition } from './transition';
 import { createId } from './ids';
 import { patchById } from './lists';
 import { appendNotifications, createNotification } from './notifications';
-import { isReservedOrOnLoan } from './requests';
+import { isOnLoan } from './requests';
 import { foldUserRating, isValidRating } from './reviews';
 import { wishlistAvailableNotifications } from './wishlist';
 
@@ -82,6 +83,8 @@ export function confirmPickup(state: AppState, requestId: string): Transition {
       pickupConfirmedBy: nowConfirmed,
       status: bothConfirmed ? ('active' as const) : r.status
     })),
+    // The item leaves its owner when the loan starts.
+    items: bothConfirmed && item ? patchById(state.items, item.id, { available: false }) : state.items,
     notifications: appendNotifications(state.notifications, notification)
   });
 }
@@ -155,8 +158,8 @@ export function confirmReturn(
 }
 
 /**
- * Both parties have confirmed the return: move the request to history, free
- * the item, update counters and reputations, and ask the borrower to review.
+ * Both parties have confirmed the return: move the request to history, mark
+ * the item back, update counters and reputations, and ask the borrower to review.
  */
 export function finalizeReturn(
   state: AppState,
@@ -181,7 +184,7 @@ export function finalizeReturn(
     conditionAfter: feedback.condition || conditionBefore
   };
 
-  const stillOnLoan = isReservedOrOnLoan(state, request.itemId, request.id);
+  const stillOnLoan = isOnLoan(state, request.itemId, request.id);
 
   const updatedItems = item
     ? patchById(state.items, item.id, (i) => ({

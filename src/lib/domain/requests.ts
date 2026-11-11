@@ -5,20 +5,29 @@
  * side exits denied and cancelled. This file covers everything up to
  * pickup; the handoffs (approved → active → completed) are in handoff.ts.
  *
- * - create: the item and the borrower must exist, and the dates must not
- *   overlap the item's blocked dates or another approved/active request for
- *   the item (pending requests do not block). The new request is stored as
- *   given and the lender is notified. The actor is not checked.
+ * Requesting is governed by dates, not by whether the item is here today
+ * (`item.available`, which only says no loan of it is active right now).
+ *
+ * - may request (`canRequestItem`): the user can see the item, is not its
+ *   owner, and has no open (pending, approved or active) request of their
+ *   own for it. This holds whether or not the item is currently out.
+ * - create: only by the actor as borrower, who may request the item (above).
+ *   The request must name the item's owner as lender, have a start and an
+ *   end with the start not after the end, and start as pending. The dates
+ *   must not overlap the item's blocked dates or another approved/active
+ *   request for the item (pending requests do not block). The lender is
+ *   notified.
  * - approve: only from pending, only while the item exists, and only if the
- *   dates still don't conflict. The item becomes unavailable and the borrower
- *   is notified. The actor is not checked.
+ *   dates still don't conflict. The borrower is notified. The item stays as
+ *   it is: it is marked out only when the loan becomes active (handoff.ts).
+ *   The actor is not checked.
  * - deny: only from pending; the borrower is notified. The actor is not
  *   checked.
  * - cancel: only the borrower or the lender. The borrower may cancel while
  *   pending or approved; the lender only while approved (a pending request
  *   is declined, not cancelled). Active loans can't be cancelled. The other
- *   party is notified; cancelling an approved request frees the item if no
- *   other approved/active request holds it, and tells wishlist subscribers.
+ *   party is notified. An approved request never marked the item out, so
+ *   cancelling it frees its dates and changes nothing else.
  * - nudge: only the borrower, only from pending, and not before
  *   `nextNudgeDate`: NUDGE_DELAY_DAYS calendar days after the request was
  *   made, or after the last nudge once there has been one, counted in local
@@ -30,7 +39,7 @@ import { DATE_FORMAT_OPTIONS, NUDGE_DELAY_DAYS } from '../constants';
 import { accept, reject, type Transition } from './transition';
 import { patchById } from './lists';
 import { appendNotifications, createNotification } from './notifications';
-import { wishlistAvailableNotifications } from './wishlist';
+import { canUserViewItem } from './permissions';
 
 /**
  * Whether a date range conflicts with the item's blocked dates or with
@@ -75,11 +84,62 @@ export function isReservedOrOnLoan(
   );
 }
 
-export function createBorrowRequest(state: AppState, request: BorrowRequest): Transition {
-  const item = state.items.find((i) => i.id === request.itemId);
-  const borrower = state.users.find((u) => u.id === request.borrowerId);
+/**
+ * Whether a loan of the item is active (picked up and not yet returned),
+ * other than `excludeRequestId`. This is what `item.available` mirrors.
+ */
+export function isOnLoan(state: AppState, itemId: string, excludeRequestId?: string): boolean {
+  return state.borrowRequests.some(
+    (r) => r.id !== excludeRequestId && r.itemId === itemId && r.status === 'active'
+  );
+}
 
-  if (!item || !borrower) return reject(state, 'Item or borrower no longer exists');
+/**
+ * Why the user may not ask to borrow the item, or null if they may: they
+ * can see it, it is not theirs, and they have no open request for it.
+ * Whether the item is out today does not matter; the dates decide.
+ */
+export function requestRefusal(state: AppState, itemId: string, userId: string): string | null {
+  const item = state.items.find((i) => i.id === itemId);
+  if (!item) return 'This item no longer exists';
+  if (!state.users.some((u) => u.id === userId)) return 'Borrower not found';
+  if (item.lenderId === userId) return "You can't borrow your own item";
+  if (!canUserViewItem(item, userId, state)) return "This item isn't shared with you";
+  const open = state.borrowRequests.some(
+    (r) =>
+      r.itemId === itemId &&
+      r.borrowerId === userId &&
+      (r.status === 'pending' || r.status === 'approved' || r.status === 'active')
+  );
+  if (open) return 'You already have an open request for this item';
+  return null;
+}
+
+/** Whether the user may ask to borrow the item (see `requestRefusal`). */
+export function canRequestItem(state: AppState, itemId: string, userId: string): boolean {
+  return requestRefusal(state, itemId, userId) === null;
+}
+
+export function createBorrowRequest(state: AppState, request: BorrowRequest): Transition {
+  if (request.borrowerId !== state.currentUserId) {
+    return reject(state, 'You can only send a borrow request for yourself');
+  }
+
+  const refusal = requestRefusal(state, request.itemId, request.borrowerId);
+  if (refusal) return reject(state, refusal);
+
+  // requestRefusal has checked both exist.
+  const item = state.items.find((i) => i.id === request.itemId)!;
+  const borrower = state.users.find((u) => u.id === request.borrowerId)!;
+
+  if (request.lenderId !== item.lenderId) {
+    return reject(state, "This request doesn't name the item's owner as lender");
+  }
+  if (request.status !== 'pending') return reject(state, 'A new request must start as pending');
+  if (!request.startDate || !request.endDate) return reject(state, 'Choose a start and an end date');
+  if (request.endDate < request.startDate) {
+    return reject(state, 'End date must not be before start date');
+  }
 
   if (hasDateConflict(state, request.itemId, request.startDate, request.endDate)) {
     return reject(state, 'Those dates conflict with an existing loan or blocked period');
@@ -127,7 +187,6 @@ export function approveRequest(state: AppState, requestId: string): Transition {
   return accept({
     ...state,
     borrowRequests: patchById(state.borrowRequests, requestId, { status: 'approved' }),
-    items: patchById(state.items, item.id, { available: false }),
     notifications: appendNotifications(state.notifications, notification)
   });
 }
@@ -200,19 +259,8 @@ export function cancelRequest(state: AppState, requestId: string): Transition {
     );
   }
 
-  // An approved request had reserved the item; release it.
-  let items = state.items;
-  if (item && request.status === 'approved') {
-    const stillOnLoan = isReservedOrOnLoan(state, item.id, requestId);
-    if (!item.available && !stillOnLoan) {
-      items = patchById(state.items, item.id, { available: true });
-      notifications.push(...wishlistAvailableNotifications(state, item, request.borrowerId));
-    }
-  }
-
   return accept({
     ...state,
-    items,
     borrowRequests: patchById(state.borrowRequests, requestId, { status: 'cancelled' }),
     notifications: [...state.notifications, ...notifications]
   });

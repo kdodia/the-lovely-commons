@@ -34,8 +34,8 @@ export function updateItem(state: AppState, itemId: string, updates: Partial<Ite
 }
 
 /**
- * Remove an item from the library. Refused while someone physically has
- * it (an approved or active loan). Pending requests are declined with a
+ * Remove an item from the library. Refused while an approved or active
+ * loan holds it (someone has reserved it or has it). Pending requests are declined with a
  * notification, and the item is scrubbed from tags and wishlists.
  */
 export function deleteItem(state: AppState, itemId: string): Transition {

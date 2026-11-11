@@ -57,6 +57,53 @@ describe('loadState resilience', () => {
 		expect(modern?.reviewerId).toBe('user1');
 	});
 
+	it('recomputes availability from active loans for items with requests', async () => {
+		const req = (id: string, itemId: string, status: string) => ({
+			id, itemId, borrowerId: 'user1', lenderId: 'user2', startDate: '2024-01-01', endDate: '2024-01-02',
+			status, createdAt: '2024-01-01T00:00:00Z', pickupConfirmedBy: [], returnConfirmedBy: []
+		});
+		const item = (id: string, available: boolean) => ({
+			id, name: id, description: '', categoryId: 'c', lenderId: 'user2', imageUrl: '', condition: 'good',
+			permissionLevel: 'friends', tagIds: [], rating: 5, totalBorrows: 0, available, createdAt: '2024-01-01T00:00:00Z'
+		});
+		localStorage.setItem(
+			STORAGE_KEY,
+			JSON.stringify({
+				currentUserId: 'user1',
+				users: [{ id: 'user1', name: 'Legacy', email: '', profilePic: '', bio: '', friendIds: [], closeFriendIds: [], rating: 5, totalBorrows: 0, totalLends: 0 }],
+				items: [
+					// Old rule: marked out by an approval that has not been picked up
+					item('reserved', false),
+					// Out on an active loan
+					item('lent', false),
+					// Wrongly marked here while a loan is active
+					item('stale', true),
+					// No requests on record: whatever was saved stands
+					item('norecord', false),
+					item('free', true)
+				],
+				borrowRequests: [
+					req('r1', 'reserved', 'approved'),
+					req('r2', 'reserved', 'completed'),
+					req('r3', 'lent', 'active'),
+					req('r4', 'lent', 'approved'),
+					req('r5', 'stale', 'active'),
+					req('r6', 'free', 'cancelled')
+				]
+			})
+		);
+		vi.resetModules();
+		const mod = await import('./index');
+		const { migrateState } = await import('./persistence');
+
+		const state = get(mod.appStore);
+		const availability = Object.fromEntries(state.items.map((i) => [i.id, i.available]));
+		expect(availability).toEqual({ reserved: true, lent: false, stale: false, norecord: false, free: true });
+
+		// Idempotent: running it again changes nothing
+		expect(migrateState(state)).toEqual(state);
+	});
+
 	it('falls back to defaults on corrupt JSON', async () => {
 		localStorage.setItem(STORAGE_KEY, '{definitely not json');
 		vi.resetModules();

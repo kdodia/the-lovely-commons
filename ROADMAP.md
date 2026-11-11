@@ -6,7 +6,7 @@ It assumes no prior conversation context — everything needed is here or in
 
 ## Where the project stands
 
-Four passes have landed:
+Five passes have landed:
 
 1. **Hardening pass** (`claude/code-review-improvements-1inwwx`): the borrow
    lifecycle works end-to-end, permissions are enforced on deep links, dates
@@ -24,6 +24,13 @@ Four passes have landed:
    (`src/lib/store/`); shared interface pieces were extracted; every large
    page was split into section components beside it. See `ARCHITECTURE.md`.
    361 tests.
+
+5. **Rough edges** (before hands-on testing): the availability calendar
+   takes an end date after "Request to Borrow" presets the start; the nudge
+   cooldown is one rule (`nextNudgeDate`) enforced by the store; and
+   `item.available` now means "here now" (false only during an active
+   loan), so an approved loan no longer stops others requesting other dates.
+   `createBorrowRequest` validates the request (`canRequestItem`).
 
 ## Conventions (do not regress these)
 
@@ -92,7 +99,8 @@ Four passes have landed:
   The lender's feedback is stashed on the request (`lenderReturnFeedback`) if
   they confirm first, so order doesn't matter.
 - `cancelRequest(requestId)`: borrower cancels pending/approved, lender
-  retracts an approval; releases the item and notifies wishlist subscribers.
+  retracts an approval. (Since the rough-edges pass, approval no longer
+  marks the item unavailable, so cancelling only frees the dates.)
 
 ### Follow-up pass
 - **Overdue reminders.** `isOverdue` / `daysOverdue` (an `active` loan whose
@@ -132,17 +140,14 @@ Four passes have landed:
 Feature work is paused: hands-on UX testing comes next, then a design spec
 for a real, federated system.
 
-1. **Rough edges testers may hit** (found during the restructure, not fixed):
-   - Approving a request marks the whole item unavailable, even for a loan
-     weeks away, so nobody can request other dates meanwhile.
-2. **Known gaps for the spec** are listed in `ARCHITECTURE.md` (actor
-   checks, request validation, cross-tab sync, identity).
-3. **Unread messages.** A thread only signals new messages through the
+1. **Known gaps for the spec** are listed in `ARCHITECTURE.md` (actor
+   checks, cross-tab sync, identity).
+2. **Unread messages.** A thread only signals new messages through the
    notification; the "Messages (n)" toggle has no unread marker.
-4. **A tester's kit.** Ready-made scenarios to load ("you have an overdue
+3. **A tester's kit.** Ready-made scenarios to load ("you have an overdue
    loan", "a stranger asks to borrow") and a one-page script for testers.
-5. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
+4. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
    bottom toasts) must clear the phone tab bar.
-6. **A real backend.** Everything is one browser's localStorage, so other
+5. **A real backend.** Everything is one browser's localStorage, so other
    users are simulated. The rulebook in `src/lib/domain/` is what a server
    would implement.

@@ -32,7 +32,12 @@ export function itemPageState(overrides: Partial<AppState> = {}): AppState {
 	});
 	return {
 		currentUserId: 'borrower',
-		users: [user('lender', 'Lena Lender'), user('borrower', 'Bo Borrower')],
+		// Friends, so the borrower may see (and request) the lender's
+		// friends-only item.
+		users: [
+			{ ...user('lender', 'Lena Lender'), friendIds: ['borrower'] },
+			{ ...user('borrower', 'Bo Borrower'), friendIds: ['lender'] }
+		],
 		items: [item],
 		categories: [],
 		tags: [],

@@ -57,6 +57,15 @@ export function loadState(): AppState {
 export function migrateState(state: AppState): AppState {
   return {
     ...state,
+    // `available` used to turn false on approval; it now means "no loan of
+    // it is active". Recompute it for items with borrow requests on record
+    // (items without any keep what was saved).
+    items: state.items.map((item) => {
+      const requests = state.borrowRequests.filter((r) => r.itemId === item.id);
+      if (requests.length === 0) return item;
+      const available = !requests.some((r) => r.status === 'active');
+      return item.available === available ? item : { ...item, available };
+    }),
     // Two-sided handoff arrays were added later; older requests lack them.
     borrowRequests: state.borrowRequests.map((r) => ({
       ...r,
