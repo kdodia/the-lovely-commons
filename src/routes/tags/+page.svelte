@@ -142,11 +142,6 @@
 {/if}
 
 <style>
-  .btn-error {
-    background-color: var(--error);
-    color: white;
-  }
-
   .tags-layout {
     display: grid;
     grid-template-columns: 300px 1fr;

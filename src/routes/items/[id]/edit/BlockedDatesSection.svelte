@@ -212,15 +212,6 @@
     margin: 0;
   }
 
-  .btn-error {
-    background-color: var(--error);
-    color: white;
-  }
-
-  .btn-error:hover:not(:disabled) {
-    filter: brightness(0.92);
-  }
-
   @media (max-width: 768px) {
     .section-header {
       flex-direction: column;

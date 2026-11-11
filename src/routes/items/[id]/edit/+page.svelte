@@ -177,20 +177,6 @@
     color: var(--text-secondary);
   }
 
-  .btn-error {
-    background-color: var(--error);
-    color: white;
-  }
-
-  .btn-error:hover:not(:disabled) {
-    filter: brightness(0.92);
-  }
-
-  .btn-error:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
   @media (max-width: 768px) {
     .danger-zone {
       flex-direction: column;
