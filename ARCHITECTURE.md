@@ -107,9 +107,13 @@ the markup they style.
 A piece moves to `src/lib/components/` only when a second page needs it.
 Shared today: `Modal`, `Tabs`, `PageHeader`, `EmptyState`, `StarRating`,
 `StarRatingInput`, `RatingScore`, `Avatar`, `UserChip`, `ItemCard`,
-`LoanCard`, `RequestThread`, `FriendPicker`, `DateRangeCalendar`,
-`FallbackImage`, `Toast`. Styles repeated verbatim across pages are in
+`ItemForm` (add and edit), `LoanCard`, `RequestThread`, `FriendPicker`,
+`DateRangeCalendar`, `FallbackImage`, `Toast`. Styles repeated verbatim across pages are in
 `src/app.css`.
+
+Where a page has several actions that each end in a toast, they are gathered
+in one small module beside it (`src/routes/dashboard/loanActions.ts`), so
+the wording is in one place.
 
 Pages do not decide rules. If a page needs to know whether something is
 allowed, it asks a domain function (through `'$lib/store'`), so the button and
@@ -147,9 +151,16 @@ clicking through, and each must be closed in a real multi-user system:
   item page enforces these before calling it.
 - **Approval makes the whole item unavailable**, even for a loan weeks away,
   so other dates cannot be requested until it completes.
-- **The nudge cooldown is counted two ways**: the item page counts calendar
-  days from the request's creation or last nudge (`nextNudgeDate`); the
+- **The nudge cooldown is counted two ways**: the item page
+  (`RequestStatus.svelte`) counts elapsed days from the request's creation
+  or last nudge, and is a day late across a daylight-saving change; the
   store's `nudgeRequest` only limits repeat nudges, in elapsed hours.
+  `nextNudgeDate` (calendar days) is the intended single rule; neither uses
+  it yet.
+- **Two exceptions to "pages do not decide rules"** remain: the item page
+  decides whether a request may be made (`BorrowAction`/`RequestForm`), and
+  `LoanCard` offers Cancel only on approved loans although the rule also
+  lets a borrower cancel a pending request.
 - **Cross-tab sync replaces the state wholesale**, skipping `migrateState()`
   and switching the acting user in every open tab.
 - **Ratings**: the first borrower review replaces an item's seeded rating;

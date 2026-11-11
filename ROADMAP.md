@@ -6,7 +6,7 @@ It assumes no prior conversation context — everything needed is here or in
 
 ## Where the project stands
 
-Three passes have landed:
+Four passes have landed:
 
 1. **Hardening pass** (`claude/code-review-improvements-1inwwx`): the borrow
    lifecycle works end-to-end, permissions are enforced on deep links, dates
@@ -19,17 +19,27 @@ Three passes have landed:
    a phone-width navbar, lender feedback on borrower profiles, automatic
    overdue notices, and a message thread on each request. 222 tests.
 
+4. **Restructure** (same branch, after PR #4): no behaviour change. The
+   store became a rulebook (`src/lib/domain/`) plus plumbing
+   (`src/lib/store/`); shared interface pieces were extracted; every large
+   page was split into section components beside it. See `ARCHITECTURE.md`.
+   361 tests.
+
 ## Conventions (do not regress these)
 
-- **All state mutations go through `appStore` action methods** in
-  `src/lib/store.ts`. The raw writable `set`/`update` are deliberately not
+- **Rules live in `src/lib/domain/`**, one file per topic, each opening with
+  its rules in plain words. They are plain functions of the state with no
+  Svelte or browser dependencies. Pages do not decide rules.
+- **All state mutations go through `appStore` action methods**
+  (`src/lib/store/appStore.ts`), each applying one rule. The raw writable `set`/`update` are deliberately not
   exported; tests inject fixtures with `appStore.replaceState()`.
 - **The actor is `state.currentUserId`.** Store methods check that the actor
   is allowed (owner / borrower / lender / tag creator) and reject otherwise.
 - **Rejectable methods return `ActionResult`** (`{ ok: true } | { ok: false; error }`).
   New rejectable actions must follow this pattern, and callers must surface
   `result.error` in a toast.
-- **Schema changes need a `migrateState()` step** (in `store.ts`). It runs on
+- **Schema changes need a `migrateState()` step** (in
+  `src/lib/store/persistence.ts`). It runs on
   every load and must be idempotent. Nested fields added later are still read
   with `?? []` / `?? undefined` at use sites.
 - **Dates**: app-state dates are `'YYYY-MM-DD'` local calendar days. Only use
@@ -119,16 +129,27 @@ Three passes have landed:
 
 ## Next ideas (not started)
 
-1. **Route tests.** Store and component coverage is thorough; the routes are
-   only checked by hand in a browser (overdue banner, `?tab=` deep links,
-   thread toggles, profile feedback visibility). `@testing-library/svelte` +
-   the writable `page` mock in `src/test/mocks/stores.ts` make item-page,
-   dashboard and profile tests feasible.
-2. **Unread messages.** A thread only signals new messages through the
+Feature work is paused: hands-on UX testing comes next, then a design spec
+for a real, federated system.
+
+1. **Rough edges testers may hit** (found during the restructure, not fixed):
+   - Pressing "Request to Borrow" before touching the calendar presets the
+     start date, after which calendar clicks do nothing until "Clear" is
+     pressed (`DateRangeCalendar` and the item page's open handler).
+   - Approving a request marks the whole item unavailable, even for a loan
+     weeks away, so nobody can request other dates meanwhile.
+   - The nudge cooldown is counted differently by the item page
+     (`RequestStatus.svelte`) and the store (`nudgeRequest`); the page's
+     version is also a day late across a daylight-saving change.
+     `nextNudgeDate` in `domain/requests.ts` is the intended single rule.
+2. **Known gaps for the spec** are listed in `ARCHITECTURE.md` (actor
+   checks, request validation, cross-tab sync, identity).
+3. **Unread messages.** A thread only signals new messages through the
    notification; the "Messages (n)" toggle has no unread marker.
-3. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
+4. **A tester's kit.** Ready-made scenarios to load ("you have an overdue
+   loan", "a stranger asks to borrow") and a one-page script for testers.
+5. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
    bottom toasts) must clear the phone tab bar.
-4. **A real backend.** Everything is one browser's localStorage, so other
-   users are simulated. Accounts and a server are the step from prototype to
-   something neighbours can use; messages and notifications are the parts
-   that would change most.
+6. **A real backend.** Everything is one browser's localStorage, so other
+   users are simulated. The rulebook in `src/lib/domain/` is what a server
+   would implement.
