@@ -8,7 +8,8 @@ import type { AppState, BorrowRequest, Item, LenderReturnFeedback, Tag } from '.
 import { initialAppState } from '../mockData';
 import * as rules from '../domain';
 import type { ActionResult, Transition } from '../domain';
-import { connectToStorage, loadState } from './persistence';
+import { getScenario } from '../scenarios';
+import { connectToStorage, loadState, migrateState } from './persistence';
 
 // Create the main app store
 function createAppStore() {
@@ -41,6 +42,17 @@ function createAppStore() {
 
     // Reset to initial state
     reset: () => set(structuredClone(initialAppState)),
+
+    /**
+     * Tester's kit: replace the whole state with a ready-made scenario (see
+     * `$lib/scenarios`), acting as its user. Saved like any other change.
+     */
+    loadScenario: (scenarioId: string): ActionResult => {
+      const scenario = getScenario(scenarioId);
+      if (!scenario) return { ok: false, error: 'No such scenario' };
+      set(migrateState(scenario.build()));
+      return { ok: true };
+    },
 
     // User actions
     setCurrentUser: (userId: string) => applyState((s) => rules.setCurrentUser(s, userId)),

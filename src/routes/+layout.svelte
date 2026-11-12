@@ -5,6 +5,7 @@
   import FallbackImage from '$lib/components/FallbackImage.svelte';
   import Modal from '$lib/components/Modal.svelte';
   import Avatar from '$lib/components/Avatar.svelte';
+  import ScenarioPicker from './ScenarioPicker.svelte';
 
   let { children } = $props();
 
@@ -99,6 +100,8 @@
         <button class="reset-btn" onclick={handleResetData} aria-label="Reset app data">
           <span aria-hidden="true">🔄</span>
         </button>
+
+        <ScenarioPicker />
 
         <a href="/notifications" class="notification-btn" aria-label="View notifications{$unreadNotificationsCount > 0 ? `, ${$unreadNotificationsCount} unread` : ''}">
           <span aria-hidden="true">🔔</span>

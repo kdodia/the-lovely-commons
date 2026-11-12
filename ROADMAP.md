@@ -6,7 +6,7 @@ It assumes no prior conversation context — everything needed is here or in
 
 ## Where the project stands
 
-Six passes have landed:
+Seven passes have landed:
 
 1. **Hardening pass** (`claude/code-review-improvements-1inwwx`): the borrow
    lifecycle works end-to-end, permissions are enforced on deep links, dates
@@ -41,6 +41,13 @@ Six passes have landed:
    items that are out on loan; the "Messages (n)" toggle shows "N new"
    (`unreadMessageCount`, `markRequestMessagesRead`, `messagesReadAt`).
    419 tests.
+
+7. **Tester's kit**: five loadable scenarios (`src/lib/scenarios.ts`,
+   `appStore.loadScenario`, the navbar's 🧪 `ScenarioPicker`): an overdue
+   loan, a stranger's request, an approved pickup, an unread reply, and a
+   blank library. Each is the mock world with only its own requests and
+   notifications; overdue ones arrive already announced. `TESTING.md` is the
+   facilitator's one-page script. 463 tests.
 
 ## Conventions (do not regress these)
 
@@ -155,10 +162,8 @@ for a real, federated system.
    touched: nobody is warned and nothing is rescheduled.
 2. **Known gaps for the spec** are listed in `ARCHITECTURE.md` (actor
    checks, cross-tab sync, identity).
-3. **A tester's kit.** Ready-made scenarios to load ("you have an overdue
-   loan", "a stranger asks to borrow") and a one-page script for testers.
-4. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
+3. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
    bottom toasts) must clear the phone tab bar.
-5. **A real backend.** Everything is one browser's localStorage, so other
+4. **A real backend.** Everything is one browser's localStorage, so other
    users are simulated. The rulebook in `src/lib/domain/` is what a server
    would implement.

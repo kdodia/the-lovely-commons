@@ -3,9 +3,10 @@ import { addDays, toLocalISODate } from './dates';
 
 // Mock dates are generated relative to today so a fresh install always shows
 // a live-looking app (pending requests, an active loan, recent history)
-// instead of everything appearing months overdue.
-const daysFromNow = (days: number): string => toLocalISODate(addDays(new Date(), days));
-const timestampDaysAgo = (days: number, hour = 10): string => {
+// instead of everything appearing months overdue. The tester scenarios in
+// `scenarios.ts` use the same two helpers.
+export const daysFromNow = (days: number): string => toLocalISODate(addDays(new Date(), days));
+export const timestampDaysAgo = (days: number, hour = 10): string => {
   const d = addDays(new Date(), -days);
   d.setHours(hour, 0, 0, 0);
   return d.toISOString();
