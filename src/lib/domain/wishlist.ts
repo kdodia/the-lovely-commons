@@ -6,10 +6,12 @@
  * nothing. They can remove their own entry and switch its "notify when
  * available" flag on or off. Each entry belongs to the user who added it.
  *
- * When an item becomes available again (a loan finishes, or an approved
- * reservation is cancelled, and no other approved/active loan holds it),
- * every subscriber with notifications on who may still see the item is told
- * — except the person who just gave it back.
+ * An item is available when it is here now: no loan of it is active. When
+ * it comes back (a loan's return is completed and no other loan of it is
+ * active), every subscriber with notifications on who may still see the
+ * item is told — except the person who just gave it back. Approving or
+ * cancelling a reservation for later dates does not change availability,
+ * so it sends nothing.
  */
 import type { AppState, Item, Notification, WishlistItem } from '../types';
 import { createId } from './ids';

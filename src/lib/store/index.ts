@@ -31,6 +31,7 @@ export {
   daysOverdue,
   nextReturnReminderDate,
   nextNudgeDate,
+  canRequestItem,
   pendingItemReviews,
   hasConfirmed,
   canSendRequestMessage,

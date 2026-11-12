@@ -110,7 +110,8 @@ describe('two-sided pickup', () => {
 	beforeEach(() => {
 		appStore.replaceState(
 			createTestState({
-				items: [createTestItem({ lenderId: 'user2', available: false })],
+				// Approved but not picked up: the item is still at home
+				items: [createTestItem({ lenderId: 'user2', available: true })],
 				borrowRequests: [createLifecycleRequest({ status: 'approved' })]
 			})
 		);
@@ -139,6 +140,14 @@ describe('two-sided pickup', () => {
 		appStore.setCurrentUser('user1');
 		appStore.confirmPickup('req1');
 		expect(get(appStore).borrowRequests[0].status).toBe('active');
+	});
+
+	it('marks the item out only when the second confirmation starts the loan', () => {
+		appStore.confirmPickup('req1');
+		expect(get(appStore).items[0].available).toBe(true);
+		appStore.setCurrentUser('user2');
+		appStore.confirmPickup('req1');
+		expect(get(appStore).items[0].available).toBe(false);
 	});
 
 	it('rejects users who are not party to the loan', () => {

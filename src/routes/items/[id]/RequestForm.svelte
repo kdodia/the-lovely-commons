@@ -36,12 +36,7 @@
   function submitRequest() {
     if (!startDate || !endDate) return;
 
-    // Validate that the range is ordered (same-day borrows are allowed)
-    if (endDate < startDate) {
-      onToast('End date must not be before start date', 'error');
-      return;
-    }
-
+    // The store checks the dates (order, conflicts) and who may ask.
     const request: BorrowRequest = {
       id: createId('req'),
       itemId: item.id,
@@ -72,6 +67,9 @@
   <button class="btn btn-primary btn-lg" onclick={openRequestForm}>
     Request to Borrow
   </button>
+  {#if !item.available}
+    <p class="action-hint">It's out on loan right now, but you can ask for later dates.</p>
+  {/if}
   <p class="action-hint">Or select dates from the calendar on the right</p>
 {:else}
   <div class="request-form">

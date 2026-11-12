@@ -16,7 +16,7 @@ describe('createLoanActions', () => {
   it('approves a pending request and says the item is reserved', () => {
     actions.approve('req1');
     expect(get(appStore).borrowRequests[0].status).toBe('approved');
-    expect(notify).toHaveBeenCalledWith('Request approved! The item is now reserved.', 'success');
+    expect(notify).toHaveBeenCalledWith('Request approved! Those dates are now reserved.', 'success');
   });
 
   it('declines a pending request', () => {
