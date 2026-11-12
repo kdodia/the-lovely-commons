@@ -195,7 +195,7 @@ describe('RequestThread', () => {
 });
 
 describe('RequestThread unread marker', () => {
-	// The lender (current user) has not read the borrower's opening note.
+	// The lender (current user) has not opened the thread yet.
 	function setup(req: BorrowRequest) {
 		appStore.replaceState(baseState({ borrowRequests: [req] }));
 		return req;
@@ -217,7 +217,7 @@ describe('RequestThread unread marker', () => {
 	it('opening the thread marks it read in the store and drops the marker', async () => {
 		const req = setup(request());
 		render(RequestThread, { props: { request: req, onSend: vi.fn() } });
-		expect(screen.getByTestId('unread-badge')).toHaveTextContent('2 new');
+		expect(screen.getByTestId('unread-badge')).toHaveTextContent('1 new');
 
 		await fireEvent.click(screen.getByRole('button', { name: /Messages/ }));
 		const stored = get(appStore).borrowRequests[0];

@@ -14,9 +14,9 @@
  * last sent a message, which they could only do having seen it). A message
  * is unread for someone if it is from the other person and newer than their
  * mark; your own messages never count. The borrower's opening `message`
- * counts as the first thing the lender has to read (it arrives with the
- * request, and the lender has not seen the thread until they open it), but
- * never counts for the borrower. `markRequestMessagesRead` sets the acting
+ * never counts either: the lender already sees it in full on the request,
+ * so the marker means "there is a follow-up you have not seen".
+ * `markRequestMessagesRead` sets the acting
  * user's mark to now, only for the borrower or lender; when nothing is
  * unread it returns the same state, so nothing is saved.
  */
@@ -48,15 +48,16 @@ export function requestThreadEntries(request: BorrowRequest): RequestMessage[] {
 }
 
 /**
- * How many messages in the thread the user has not read yet: from the other
- * person, newer than the user's read mark (all of them with no mark). Zero
+ * How many follow-up messages the user has not read yet: from the other
+ * person, newer than the user's read mark (all of them with no mark). The
+ * opening note is not counted. Zero
  * for anyone who is not the borrower or lender.
  */
 export function unreadMessageCount(request: BorrowRequest, userId: string): number {
   if (userId !== request.borrowerId && userId !== request.lenderId) return 0;
   const readAt = (request.messagesReadAt ?? {})[userId];
   const readTime = readAt ? Date.parse(readAt) : -Infinity;
-  return requestThreadEntries(request).filter(
+  return (request.messages ?? []).filter(
     (m) => m.fromUserId !== userId && Date.parse(m.at) > readTime
   ).length;
 }

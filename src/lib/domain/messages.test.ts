@@ -143,10 +143,10 @@ describe('unread messages', () => {
 	}
 	const stored = () => get(appStore).borrowRequests[0];
 
-	it('counts the other persons messages, and the opening note only for the lender', () => {
+	it('counts the other persons follow-up messages, never the opening note', () => {
 		const r = base();
 		expect(unreadMessageCount(r, 'user1')).toBe(1); // user2's reply
-		expect(unreadMessageCount(r, 'user2')).toBe(2); // opening note + user1's follow-up
+		expect(unreadMessageCount(r, 'user2')).toBe(1); // user1's follow-up, not the opening note
 	});
 
 	it('counts only messages newer than the read mark', () => {
@@ -194,6 +194,6 @@ describe('unread messages', () => {
 		setup(base());
 		appStore.sendRequestMessage('req1', 'Pick up at 5?');
 		expect(unreadMessageCount(stored(), 'user1')).toBe(0);
-		expect(unreadMessageCount(stored(), 'user2')).toBe(3);
+		expect(unreadMessageCount(stored(), 'user2')).toBe(2);
 	});
 });

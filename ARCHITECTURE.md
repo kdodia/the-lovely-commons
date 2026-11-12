@@ -88,7 +88,7 @@ to the day before the start (no blocked date, no other approved/active
 loan); otherwise each confirmation is refused with the reason. An early
 pickup that makes the loan active moves its start date to today.
 
-While pending, approved or active, either person may `sendRequestMessage`. Each person has a read mark on the request (`messagesReadAt`); `unreadMessageCount` counts the other person's newer messages (the borrower's opening note counts for the lender), and `markRequestMessagesRead` sets the mark when the thread is opened or a message is sent.
+While pending, approved or active, either person may `sendRequestMessage`. Each person has a read mark on the request (`messagesReadAt`); `unreadMessageCount` counts the other person's newer messages (never the borrower's opening note, which the lender sees on the request), and `markRequestMessagesRead` sets the mark when the thread is opened or a message is sent.
 While pending, the borrower may `nudgeRequest`, once per `NUDGE_DELAY_DAYS`
 calendar days from the request or the last nudge (`nextNudgeDate`). While
 active and past its end date a loan is overdue: the lender may

@@ -488,7 +488,7 @@ export const mockBorrowRequests: BorrowRequest[] = [
       }
     ],
     // Both have read the whole thread. (req4 has no marks: Sarah, its
-    // lender, starts with unread messages.)
+    // lender, starts with one unread follow-up.)
     messagesReadAt: { user1: timestampDaysAgo(5, 19), user2: timestampDaysAgo(5, 20) }
   },
   {
