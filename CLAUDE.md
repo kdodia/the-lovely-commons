@@ -156,6 +156,8 @@ The app initializes with pre-populated data in `src/lib/mockData.ts`:
 
 This mock data is loaded into the store on first run if localStorage is empty.
 
+**Tester's kit**: `src/lib/scenarios.ts` holds ready-made scenarios (overdue loan, stranger's request, approved pickup, unread reply, blank library). Each is data built from the mock data with dates relative to today; `appStore.loadScenario(id)` replaces the state with one, and the navbar's 🧪 picker (`src/routes/ScenarioPicker.svelte`) loads it and opens its start page. `src/lib/scenarios.test.ts` checks each is consistent under the current rules. `TESTING.md` is the facilitator's script.
+
 ## Key Components
 
 Shared components in `src/lib/components/` (a piece moves here only when a second page needs it):

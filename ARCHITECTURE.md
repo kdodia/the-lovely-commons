@@ -106,6 +106,11 @@ active and past its end date a loan is overdue: the lender may
 `apply` runs a rule on the current state, stores the result if it changed,
 and returns the rule's `ActionResult`. Pages show `result.error` in a toast.
 
+`appStore.loadScenario(id)` replaces the whole state with one of the tester's
+scenarios in `src/lib/scenarios.ts`: plain data built from the mock users and
+items with dates relative to today, not rules. The navbar's
+`src/routes/ScenarioPicker.svelte` lists them; `TESTING.md` is the script.
+
 Persisted state is upgraded on every load by `migrateState()`. New fields
 should be optional and read with `?? default`; when a stored shape truly
 changes, add an idempotent step there.

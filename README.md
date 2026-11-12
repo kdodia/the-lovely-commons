@@ -70,6 +70,8 @@ bun run preview
 
 The app will be available at `http://localhost:5173`
 
+Running a hands-on test session? See [TESTING.md](TESTING.md) for the facilitator's script and the scenario picker (🧪).
+
 ## 📱 How to Use
 
 ### As a Borrower
