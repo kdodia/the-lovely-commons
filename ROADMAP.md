@@ -140,14 +140,30 @@ Five passes have landed:
 Feature work is paused: hands-on UX testing comes next, then a design spec
 for a real, federated system.
 
-1. **Known gaps for the spec** are listed in `ARCHITECTURE.md` (actor
+1. **Rough edges, next PR** (found while fixing the calendar, nudge and
+   availability; none fixed yet). Quick, and testers will notice them:
+   - The hint "Or select dates from the calendar on the right"
+     (`src/routes/items/[id]/RequestForm.svelte`) shows at phone width,
+     where the calendar is below the form.
+   - "Request to Borrow" presets tomorrow as the start date even when
+     tomorrow is booked or blocked; every end date is then refused until
+     the user presses Clear. Preset the first selectable day, or none.
+   - A lender's profile (`src/routes/profile/[id]/+page.svelte`) lists only
+     items available right now, so an item out on loan disappears from it.
+   Rule questions, better settled with the spec in mind:
+   - An overdue loan only holds its original dates, so someone can be
+     approved for dates right after its end while the item is still out
+     (`hasDateConflict` in `domain/requests.ts`).
+   - `confirmPickup` (`domain/handoff.ts`) does not check dates, so a loan
+     can become active, and the item out, before its start day.
+2. **Known gaps for the spec** are listed in `ARCHITECTURE.md` (actor
    checks, cross-tab sync, identity).
-2. **Unread messages.** A thread only signals new messages through the
+3. **Unread messages.** A thread only signals new messages through the
    notification; the "Messages (n)" toggle has no unread marker.
-3. **A tester's kit.** Ready-made scenarios to load ("you have an overdue
+4. **A tester's kit.** Ready-made scenarios to load ("you have an overdue
    loan", "a stranger asks to borrow") and a one-page script for testers.
-4. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
+5. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
    bottom toasts) must clear the phone tab bar.
-5. **A real backend.** Everything is one browser's localStorage, so other
+6. **A real backend.** Everything is one browser's localStorage, so other
    users are simulated. The rulebook in `src/lib/domain/` is what a server
    would implement.
