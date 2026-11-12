@@ -8,8 +8,11 @@ import {
 	canRequestItem,
 	cancelRequest,
 	createBorrowRequest,
+	hasDateConflict,
 	nextNudgeDate,
-	nudgeRequest
+	nudgeRequest,
+	occupiedRanges,
+	occupiedUntil
 } from './requests';
 import { addDays, toLocalISODate } from '$lib/dates';
 import { NUDGE_DELAY_DAYS } from '$lib/constants';
@@ -552,5 +555,64 @@ describe('nextNudgeDate', () => {
 			lastNudgedAt: new Date(2030, 0, 20, 0, 15).toISOString()
 		});
 		expect(nextNudgeDate(request)).toBe('2030-01-23');
+	});
+});
+
+describe('an overdue loan holds the item through today', () => {
+	// Today is 2030-01-20; user3's loan of item1 (2030-01-10..12) is still out.
+	const overdue = createLifecycleRequest({ id: 'late', status: 'active', borrowerId: 'user3' });
+	const stateWith = (...requests: BorrowRequest[]) =>
+		createTestState({
+			items: [createTestItem({ available: false })],
+			borrowRequests: [overdue, ...requests]
+		});
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(new Date(2030, 0, 20, 12, 0));
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('extends only an overdue active loan to today', () => {
+		expect(occupiedUntil(overdue, '2030-01-20')).toBe('2030-01-20');
+		expect(occupiedUntil(overdue, '2030-01-12')).toBe('2030-01-12'); // due today
+		expect(occupiedUntil({ ...overdue, status: 'approved' }, '2030-01-20')).toBe('2030-01-12');
+		expect(occupiedRanges(stateWith(), 'item1')).toEqual([
+			{ startDate: '2030-01-10', endDate: '2030-01-20' }
+		]);
+	});
+
+	it('blocks the days after its end date up to and including today', () => {
+		const state = stateWith();
+		expect(hasDateConflict(state, 'item1', '2030-01-13', '2030-01-13')).toBe(true);
+		expect(hasDateConflict(state, 'item1', '2030-01-18', '2030-01-19')).toBe(true);
+		expect(hasDateConflict(state, 'item1', '2030-01-20', '2030-01-22')).toBe(true);
+		const inStretch = createLifecycleRequest({ startDate: '2030-01-15', endDate: '2030-01-16' });
+		expect(createBorrowRequest(state, inStretch).result).toEqual({
+			ok: false,
+			error: 'Those dates conflict with an existing loan or blocked period'
+		});
+	});
+
+	it('leaves the days after today free', () => {
+		const state = stateWith();
+		expect(hasDateConflict(state, 'item1', '2030-01-21', '2030-01-23')).toBe(false);
+		const later = createLifecycleRequest({ startDate: '2030-01-21', endDate: '2030-01-23' });
+		expect(createBorrowRequest(state, later).result).toEqual({ ok: true });
+	});
+
+	it('refuses to approve dates that overlap the overdue stretch', () => {
+		const state = stateWith(
+			createLifecycleRequest({ id: 'clash', startDate: '2030-01-19', endDate: '2030-01-22' }),
+			createLifecycleRequest({ id: 'clear', startDate: '2030-01-21', endDate: '2030-01-22' })
+		);
+		expect(approveRequest(state, 'clash').result).toEqual({
+			ok: false,
+			error: 'Those dates conflict with an existing loan or blocked period'
+		});
+		expect(approveRequest(state, 'clear').result).toEqual({ ok: true });
 	});
 });

@@ -5,6 +5,13 @@
  *   lender, once each (`pickupConfirmedBy`). The first confirmation tells
  *   the other party to confirm on their side; the second makes the loan
  *   active and marks the item out (`available: false`).
+ * - Early pickup: before the loan's start day, each confirmation is allowed
+ *   only if the item is free from today to the day before the start: no
+ *   blocked date and no other approved/active loan (an overdue one holds
+ *   the item through today) overlaps those days. Otherwise it is refused
+ *   with the reason. When an early pickup makes the loan active, its start
+ *   date moves to today so the calendar shows the item as out. On or after
+ *   the start day, pickup does not look at dates.
  * - Return: allowed only while the loan is active, by its borrower or
  *   lender, once each (`returnConfirmedBy`). The lender may pass feedback (a
  *   rating of the borrower from MIN_RATING to MAX_RATING, a note, the item's
@@ -19,13 +26,13 @@
  *   borrower. Approved loans for later dates do not keep it out.
  */
 import type { AppState, BorrowHistory, BorrowRequest, LenderReturnFeedback, Notification } from '../types';
-import { todayLocalISO } from '../dates';
-import { MAX_RATING, MIN_RATING } from '../constants';
+import { addDays, formatDisplayDate, parseLocalDate, rangesOverlap, toLocalISODate, todayLocalISO } from '../dates';
+import { DATE_FORMAT_OPTIONS, MAX_RATING, MIN_RATING } from '../constants';
 import { accept, reject, type Transition } from './transition';
 import { createId } from './ids';
 import { patchById } from './lists';
 import { appendNotifications, createNotification } from './notifications';
-import { isOnLoan } from './requests';
+import { isOnLoan, occupiedRanges } from './requests';
 import { foldUserRating, isValidRating } from './reviews';
 import { wishlistAvailableNotifications } from './wishlist';
 
@@ -57,6 +64,13 @@ export function confirmPickup(state: AppState, requestId: string): Transition {
   const confirmed = request.pickupConfirmedBy ?? [];
   if (confirmed.includes(actorId)) return reject(state, 'You already confirmed this pickup');
 
+  const today = todayLocalISO();
+  const early = today < request.startDate;
+  if (early) {
+    const refusal = earlyPickupRefusal(state, request, today);
+    if (refusal) return reject(state, refusal);
+  }
+
   const nowConfirmed = [...confirmed, actorId];
   const bothConfirmed =
     nowConfirmed.includes(request.borrowerId) && nowConfirmed.includes(request.lenderId);
@@ -81,12 +95,43 @@ export function confirmPickup(state: AppState, requestId: string): Transition {
     borrowRequests: patchById(state.borrowRequests, requestId, (r) => ({
       ...r,
       pickupConfirmedBy: nowConfirmed,
-      status: bothConfirmed ? ('active' as const) : r.status
+      status: bothConfirmed ? ('active' as const) : r.status,
+      // An early pickup starts the loan today, so its dates show it out.
+      startDate: bothConfirmed && early ? today : r.startDate
     })),
     // The item leaves its owner when the loan starts.
     items: bothConfirmed && item ? patchById(state.items, item.id, { available: false }) : state.items,
     notifications: appendNotifications(state.notifications, notification)
   });
+}
+
+/**
+ * Why the item can't be picked up before the loan's start day, or null if
+ * it is free (not blocked, not held by another approved/active loan) every
+ * day from `today` to the day before the start. Names the last day in that
+ * stretch that isn't free.
+ */
+export function earlyPickupRefusal(
+  state: AppState,
+  request: BorrowRequest,
+  today: string = todayLocalISO()
+): string | null {
+  if (today >= request.startDate) return null;
+  const gapEnd = toLocalISODate(addDays(parseLocalDate(request.startDate), -1));
+  const item = state.items.find((i) => i.id === request.itemId);
+  const busy = [
+    ...(item?.blockedDates ?? []),
+    ...occupiedRanges(state, request.itemId, today, request.id)
+  ].filter((r) => rangesOverlap(r.startDate, r.endDate, today, gapEnd));
+  if (busy.length === 0) return null;
+
+  const lastBusy = busy.reduce((last, r) => {
+    const end = r.endDate < gapEnd ? r.endDate : gapEnd;
+    return end > last ? end : last;
+  }, today);
+  const fmt = (d: string) => formatDisplayDate(d, DATE_FORMAT_OPTIONS.short);
+  const when = lastBusy === today ? 'today' : `on ${fmt(lastBusy)}`;
+  return `${item?.name ?? 'This item'} isn't free ${when}, before this loan starts. Pick it up on or after ${fmt(request.startDate)}.`;
 }
 
 /**

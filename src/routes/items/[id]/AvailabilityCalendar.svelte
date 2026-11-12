@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { appStore } from '$lib/store';
+  import { appStore, occupiedRanges } from '$lib/store';
   import DateRangeCalendar from '$lib/components/DateRangeCalendar.svelte';
   import type { Item } from '$lib/types';
-  import { addDays, startOfLocalDay } from '$lib/dates';
+  import { addDays, startOfLocalDay, todayLocalISO } from '$lib/dates';
 
   /**
    * "Availability & Booking" card. Picking dates here also opens the request
@@ -22,12 +22,9 @@
     showRequestForm = $bindable()
   }: Props = $props();
 
-  // Booked date ranges: approved or active loans of this item
-  let bookedDateRanges = $derived(
-    $appStore.borrowRequests
-      .filter((r) => r.itemId === item.id && (r.status === 'approved' || r.status === 'active'))
-      .map((b) => ({ startDate: b.startDate, endDate: b.endDate }))
-  );
+  // Booked date ranges: the dates approved or active loans of this item
+  // hold (an overdue loan holds them through today), as the request rules see them
+  let bookedDateRanges = $derived(occupiedRanges($appStore, item.id, todayLocalISO()));
 
   // Blocked date ranges: the owner's own no-lend dates
   let blockedDateRanges = $derived(item.blockedDates || []);

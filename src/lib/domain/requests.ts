@@ -17,6 +17,11 @@
  *   must not overlap the item's blocked dates or another approved/active
  *   request for the item (pending requests do not block). The lender is
  *   notified.
+ * - occupied dates (`occupiedRanges`): an approved or active loan holds its
+ *   startDate..endDate. An overdue loan (active, endDate before today) is
+ *   still out, so it holds startDate through today (`occupiedUntil`); days
+ *   after today stay requestable. Requests, approval, early pickup and the
+ *   item page's calendar all use these ranges.
  * - approve: only from pending, only while the item exists, and only if the
  *   dates still don't conflict. The borrower is notified. The item stays as
  *   it is: it is marked out only when the loan becomes active (handoff.ts).
@@ -32,9 +37,18 @@
  *   `nextNudgeDate`: NUDGE_DELAY_DAYS calendar days after the request was
  *   made, or after the last nudge once there has been one, counted in local
  *   days. The lender is reminded.
+ * - suggested start (`firstSelectableStartDate`): the first day from a given
+ *   date, within 60 days, that is not blocked or booked; none if all are.
  */
 import type { AppState, BorrowRequest, Notification } from '../types';
-import { addDays, formatDisplayDate, rangesOverlap, toLocalISODate, todayLocalISO } from '../dates';
+import {
+  addDays,
+  formatDisplayDate,
+  parseLocalDate,
+  rangesOverlap,
+  toLocalISODate,
+  todayLocalISO
+} from '../dates';
 import { DATE_FORMAT_OPTIONS, NUDGE_DELAY_DAYS } from '../constants';
 import { accept, reject, type Transition } from './transition';
 import { patchById } from './lists';
@@ -42,15 +56,44 @@ import { appendNotifications, createNotification } from './notifications';
 import { canUserViewItem } from './permissions';
 
 /**
+ * The last day a loan holds its item: its end date, or today while it is
+ * active and past its end date (overdue), since the item is still out.
+ */
+export function occupiedUntil(request: BorrowRequest, today: string = todayLocalISO()): string {
+  return request.status === 'active' && request.endDate < today ? today : request.endDate;
+}
+
+/**
+ * The date ranges the item's approved/active loans (other than
+ * `excludeRequestId`) hold, each ending at `occupiedUntil`.
+ */
+export function occupiedRanges(
+  state: AppState,
+  itemId: string,
+  today: string = todayLocalISO(),
+  excludeRequestId?: string
+): Array<{ startDate: string; endDate: string }> {
+  return state.borrowRequests
+    .filter(
+      (r) =>
+        r.id !== excludeRequestId &&
+        r.itemId === itemId &&
+        (r.status === 'approved' || r.status === 'active')
+    )
+    .map((r) => ({ startDate: r.startDate, endDate: occupiedUntil(r, today) }));
+}
+
+/**
  * Whether a date range conflicts with the item's blocked dates or with
- * another approved/active borrow of the same item.
+ * the dates another approved/active borrow of the same item occupies.
  */
 export function hasDateConflict(
   state: AppState,
   itemId: string,
   startDate: string,
   endDate: string,
-  excludeRequestId?: string
+  excludeRequestId?: string,
+  today: string = todayLocalISO()
 ): boolean {
   const item = state.items.find((i) => i.id === itemId);
   const blockedConflict = (item?.blockedDates ?? []).some((b) =>
@@ -58,12 +101,8 @@ export function hasDateConflict(
   );
   if (blockedConflict) return true;
 
-  return state.borrowRequests.some(
-    (r) =>
-      r.id !== excludeRequestId &&
-      r.itemId === itemId &&
-      (r.status === 'approved' || r.status === 'active') &&
-      rangesOverlap(r.startDate, r.endDate, startDate, endDate)
+  return occupiedRanges(state, itemId, today, excludeRequestId).some((r) =>
+    rangesOverlap(r.startDate, r.endDate, startDate, endDate)
   );
 }
 
@@ -351,4 +390,23 @@ export function borrowedBy(state: AppState, userId: string): BorrowRequest[] {
   return state.borrowRequests.filter(
     (req) => req.borrowerId === userId && (req.status === 'approved' || req.status === 'active')
   );
+}
+
+/**
+ * The first day, from `fromDate` onward, that a one-day request for the item
+ * could start on: the same test as `hasDateConflict`, which is also what
+ * greys out days on the booking calendar. Looks at most `windowDays` days
+ * ahead (including `fromDate`) and returns '' when every one is taken.
+ */
+export function firstSelectableStartDate(
+  state: AppState,
+  itemId: string,
+  fromDate: string,
+  windowDays = 60
+): string {
+  for (let offset = 0; offset < windowDays; offset++) {
+    const day = toLocalISODate(addDays(parseLocalDate(fromDate), offset));
+    if (!hasDateConflict(state, itemId, day, day)) return day;
+  }
+  return '';
 }

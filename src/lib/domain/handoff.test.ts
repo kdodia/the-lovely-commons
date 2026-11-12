@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { get } from 'svelte/store';
 import {
 	appStore,
 	hasConfirmed
 } from '$lib/store';
-import type { BorrowRequest } from '$lib/types';
-import { createTestState, createTestItem, createLifecycleRequest } from '../../test/fixtures';
+import type { AppState, BorrowRequest } from '$lib/types';
+import { createTestState, createTestItem, createLifecycleRequest, confirmBothSides } from '../../test/fixtures';
 
 describe('appStore actions', () => {
 	beforeEach(() => {
@@ -178,6 +178,116 @@ describe('two-sided pickup', () => {
 		expect(hasConfirmed(legacy, 'pickup', 'user1')).toBe(false);
 		expect(appStore.confirmPickup('req1').ok).toBe(true);
 		expect(get(appStore).borrowRequests[0].pickupConfirmedBy).toEqual(['user1']);
+	});
+});
+
+describe('pickup before the start day', () => {
+	// The loan (user1 borrows item1 from user2) runs 2030-01-10..12.
+	function setup(today: Date, overrides: Partial<AppState> = {}) {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(today);
+		appStore.replaceState(
+			createTestState({
+				items: [createTestItem({ lenderId: 'user2', name: 'Drill' })],
+				borrowRequests: [createLifecycleRequest({ status: 'approved' })],
+				...overrides
+			})
+		);
+	}
+	const loan = () => get(appStore).borrowRequests.find((r) => r.id === 'req1')!;
+	const otherLoan = (overrides: Partial<BorrowRequest>) =>
+		createLifecycleRequest({ id: 'other', borrowerId: 'user3', ...overrides });
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('is allowed when the item is free until the start, and moves the start to today on activation', () => {
+		setup(new Date(2030, 0, 7, 12, 0));
+
+		expect(appStore.confirmPickup('req1')).toEqual({ ok: true });
+		expect(loan().status).toBe('approved');
+		expect(loan().startDate).toBe('2030-01-10');
+
+		appStore.setCurrentUser('user2');
+		expect(appStore.confirmPickup('req1')).toEqual({ ok: true });
+		expect(loan().status).toBe('active');
+		expect(loan().startDate).toBe('2030-01-07');
+		expect(loan().endDate).toBe('2030-01-12');
+		expect(get(appStore).items[0].available).toBe(false);
+	});
+
+	it('is refused when a blocked date falls between today and the start', () => {
+		setup(new Date(2030, 0, 7, 12, 0), {
+			items: [
+				createTestItem({
+					lenderId: 'user2',
+					name: 'Drill',
+					blockedDates: [{ startDate: '2030-01-08', endDate: '2030-01-08' }]
+				})
+			]
+		});
+
+		expect(appStore.confirmPickup('req1')).toEqual({
+			ok: false,
+			error: "Drill isn't free on Jan 8, before this loan starts. Pick it up on or after Jan 10."
+		});
+		expect(loan().pickupConfirmedBy ?? []).toEqual([]);
+	});
+
+	it('is refused while another loan holds the item, including an overdue one', () => {
+		// Another approved loan ends the day before the start.
+		setup(new Date(2030, 0, 7, 12, 0), {
+			borrowRequests: [
+				createLifecycleRequest({ status: 'approved' }),
+				otherLoan({ status: 'approved', startDate: '2030-01-08', endDate: '2030-01-09' })
+			]
+		});
+		expect(appStore.confirmPickup('req1')).toEqual({
+			ok: false,
+			error: "Drill isn't free on Jan 9, before this loan starts. Pick it up on or after Jan 10."
+		});
+
+		// An overdue loan (due back Jan 5) still holds the item today.
+		setup(new Date(2030, 0, 7, 12, 0), {
+			borrowRequests: [
+				createLifecycleRequest({ status: 'approved' }),
+				otherLoan({ status: 'active', startDate: '2030-01-01', endDate: '2030-01-05' })
+			]
+		});
+		expect(appStore.confirmPickup('req1')).toEqual({
+			ok: false,
+			error: "Drill isn't free today, before this loan starts. Pick it up on or after Jan 10."
+		});
+	});
+
+	it('checks again on the second confirmation', () => {
+		setup(new Date(2030, 0, 7, 12, 0));
+		expect(appStore.confirmPickup('req1').ok).toBe(true);
+
+		// The lender blocks a day in between before confirming.
+		const state = get(appStore);
+		appStore.replaceState({
+			...state,
+			currentUserId: 'user2',
+			items: [{ ...state.items[0], blockedDates: [{ startDate: '2030-01-09', endDate: '2030-01-09' }] }]
+		});
+		expect(appStore.confirmPickup('req1').ok).toBe(false);
+		expect(loan().status).toBe('approved');
+		expect(loan().startDate).toBe('2030-01-10');
+	});
+
+	it('is unchanged on or after the start day', () => {
+		// On the start day, an overdue loan is not looked at and the dates stay.
+		setup(new Date(2030, 0, 10, 9, 0), {
+			borrowRequests: [
+				createLifecycleRequest({ status: 'approved' }),
+				otherLoan({ status: 'active', startDate: '2030-01-01', endDate: '2030-01-05' })
+			]
+		});
+		expect(confirmBothSides('pickup', 'req1')).toEqual({ ok: true });
+		expect(loan().status).toBe('active');
+		expect(loan().startDate).toBe('2030-01-10');
 	});
 });
 

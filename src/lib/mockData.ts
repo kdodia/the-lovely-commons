@@ -486,7 +486,10 @@ export const mockBorrowRequests: BorrowRequest[] = [
         text: 'Yep, all the blades are in the side pocket. See you then!',
         at: timestampDaysAgo(5, 20)
       }
-    ]
+    ],
+    // Both have read the whole thread. (req4 has no marks: Sarah, its
+    // lender, starts with one unread follow-up.)
+    messagesReadAt: { user1: timestampDaysAgo(5, 19), user2: timestampDaysAgo(5, 20) }
   },
   {
     id: 'req4',

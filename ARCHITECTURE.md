@@ -79,9 +79,16 @@ export function approveRequest(state: AppState, requestId: string): Transition {
 loan of it is active. Requests are governed by dates instead: anyone who can
 see the item, does not own it and has no open request for it may ask for
 dates that do not overlap its blocked dates or an approved/active loan
-(`hasDateConflict`), whether or not it is out today.
+(`hasDateConflict`), whether or not it is out today. An overdue loan is still
+out, so it holds its item from its start through today (`occupiedUntil`);
+the item page's calendar shows the same occupied days (`occupiedRanges`).
 
-While pending, approved or active, either person may `sendRequestMessage`.
+Pickup before the start day is allowed only if the item is free from today
+to the day before the start (no blocked date, no other approved/active
+loan); otherwise each confirmation is refused with the reason. An early
+pickup that makes the loan active moves its start date to today.
+
+While pending, approved or active, either person may `sendRequestMessage`. Each person has a read mark on the request (`messagesReadAt`); `unreadMessageCount` counts the other person's newer messages (never the borrower's opening note, which the lender sees on the request), and `markRequestMessagesRead` sets the mark when the thread is opened or a message is sent.
 While pending, the borrower may `nudgeRequest`, once per `NUDGE_DELAY_DAYS`
 calendar days from the request or the last nudge (`nextNudgeDate`). While
 active and past its end date a loan is overdue: the lender may

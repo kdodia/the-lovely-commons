@@ -6,7 +6,7 @@ It assumes no prior conversation context — everything needed is here or in
 
 ## Where the project stands
 
-Five passes have landed:
+Six passes have landed:
 
 1. **Hardening pass** (`claude/code-review-improvements-1inwwx`): the borrow
    lifecycle works end-to-end, permissions are enforced on deep links, dates
@@ -31,6 +31,16 @@ Five passes have landed:
    `item.available` now means "here now" (false only during an active
    loan), so an approved loan no longer stops others requesting other dates.
    `createBorrowRequest` validates the request (`canRequestItem`).
+
+6. **Second rough-edges pass**: an overdue loan holds its item through
+   today (`occupiedRanges` / `occupiedUntil`, used by requests, approval,
+   early pickup and the calendar); pickup before the start day is allowed
+   only when the days until then are free, and then moves the loan's start
+   to today (`earlyPickupRefusal`); "Request to Borrow" presets the first
+   selectable day (`firstSelectableStartDate`); a lender's profile lists
+   items that are out on loan; the "Messages (n)" toggle shows "N new"
+   (`unreadMessageCount`, `markRequestMessagesRead`, `messagesReadAt`).
+   419 tests.
 
 ## Conventions (do not regress these)
 
@@ -140,30 +150,15 @@ Five passes have landed:
 Feature work is paused: hands-on UX testing comes next, then a design spec
 for a real, federated system.
 
-1. **Rough edges, next PR** (found while fixing the calendar, nudge and
-   availability; none fixed yet). Quick, and testers will notice them:
-   - The hint "Or select dates from the calendar on the right"
-     (`src/routes/items/[id]/RequestForm.svelte`) shows at phone width,
-     where the calendar is below the form.
-   - "Request to Borrow" presets tomorrow as the start date even when
-     tomorrow is booked or blocked; every end date is then refused until
-     the user presses Clear. Preset the first selectable day, or none.
-   - A lender's profile (`src/routes/profile/[id]/+page.svelte`) lists only
-     items available right now, so an item out on loan disappears from it.
-   Rule questions, better settled with the spec in mind:
-   - An overdue loan only holds its original dates, so someone can be
-     approved for dates right after its end while the item is still out
-     (`hasDateConflict` in `domain/requests.ts`).
-   - `confirmPickup` (`domain/handoff.ts`) does not check dates, so a loan
-     can become active, and the item out, before its start day.
+1. **Left open by the overdue rule, for the spec.** A request already
+   approved for the days right after a loan that then runs overdue is not
+   touched: nobody is warned and nothing is rescheduled.
 2. **Known gaps for the spec** are listed in `ARCHITECTURE.md` (actor
    checks, cross-tab sync, identity).
-3. **Unread messages.** A thread only signals new messages through the
-   notification; the "Messages (n)" toggle has no unread marker.
-4. **A tester's kit.** Ready-made scenarios to load ("you have an overdue
+3. **A tester's kit.** Ready-made scenarios to load ("you have an overdue
    loan", "a stranger asks to borrow") and a one-page script for testers.
-5. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
+4. **Bottom-bar awareness.** Any future bottom-anchored UI (sticky footers,
    bottom toasts) must clear the phone tab bar.
-6. **A real backend.** Everything is one browser's localStorage, so other
+5. **A real backend.** Everything is one browser's localStorage, so other
    users are simulated. The rulebook in `src/lib/domain/` is what a server
    would implement.

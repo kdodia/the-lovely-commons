@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { appStore, createId } from '$lib/store';
+  import { appStore, createId, firstSelectableStartDate } from '$lib/store';
   import type { BorrowRequest, Item } from '$lib/types';
   import type { ToastType } from '$lib/useToast.svelte';
   import { addDays, toLocalISODate } from '$lib/dates';
@@ -29,8 +29,13 @@
 
   function openRequestForm() {
     showRequestForm = true;
-    // Set min date to tomorrow
-    startDate = toLocalISODate(addDays(new Date(), 1));
+    // Preset the first day from tomorrow that the calendar lets you pick
+    // (none if the next 60 days are all taken).
+    startDate = firstSelectableStartDate(
+      $appStore,
+      item.id,
+      toLocalISODate(addDays(new Date(), 1))
+    );
   }
 
   function submitRequest() {
@@ -70,7 +75,7 @@
   {#if !item.available}
     <p class="action-hint">It's out on loan right now, but you can ask for later dates.</p>
   {/if}
-  <p class="action-hint">Or select dates from the calendar on the right</p>
+  <p class="action-hint">Or select dates from the calendar</p>
 {:else}
   <div class="request-form">
     <h3>Request to Borrow</h3>
