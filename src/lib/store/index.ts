@@ -32,6 +32,7 @@ export {
   nextReturnReminderDate,
   nextNudgeDate,
   canRequestItem,
+  occupiedRanges,
   pendingItemReviews,
   hasConfirmed,
   canSendRequestMessage,
