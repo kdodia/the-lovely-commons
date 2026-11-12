@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/svelte';
 import RequestThread from './RequestThread.svelte';
-import { appStore } from '$lib/store';
+import { get } from 'svelte/store';
+import { tick } from 'svelte';
+import { appStore, unreadMessageCount } from '$lib/store';
 import { REQUEST_MESSAGE_MAX_LENGTH } from '$lib/constants';
 import type { AppState, BorrowRequest } from '$lib/types';
 
@@ -189,5 +191,50 @@ describe('RequestThread', () => {
 			}
 		});
 		expect(screen.queryByTestId('request-thread')).not.toBeInTheDocument();
+	});
+});
+
+describe('RequestThread unread marker', () => {
+	// The lender (current user) has not read the borrower's opening note.
+	function setup(req: BorrowRequest) {
+		appStore.replaceState(baseState({ borrowRequests: [req] }));
+		return req;
+	}
+
+	it('shows how many messages are new on the collapsed toggle', () => {
+		const req = setup(request({ messagesReadAt: { lender: '2030-01-01T10:30:00Z' } }));
+		render(RequestThread, { props: { request: req, onSend: vi.fn() } });
+		// Only the borrower's 11:00 reply is newer than the mark.
+		expect(screen.getByTestId('unread-badge')).toHaveTextContent('1 new');
+	});
+
+	it('has no marker when everything is read', () => {
+		const req = setup(request({ messagesReadAt: { lender: '2030-01-02T00:00:00Z' } }));
+		render(RequestThread, { props: { request: req, onSend: vi.fn() } });
+		expect(screen.queryByTestId('unread-badge')).not.toBeInTheDocument();
+	});
+
+	it('opening the thread marks it read in the store and drops the marker', async () => {
+		const req = setup(request());
+		render(RequestThread, { props: { request: req, onSend: vi.fn() } });
+		expect(screen.getByTestId('unread-badge')).toHaveTextContent('2 new');
+
+		await fireEvent.click(screen.getByRole('button', { name: /Messages/ }));
+		const stored = get(appStore).borrowRequests[0];
+		expect(stored.messagesReadAt?.lender).toBeTruthy();
+		expect(screen.queryByTestId('unread-badge')).not.toBeInTheDocument();
+	});
+
+	it('marks a message that arrives while the thread is open as read', async () => {
+		setup(request({ messagesReadAt: { lender: '2030-01-02T00:00:00Z' } }));
+		const rendered = render(RequestThread, {
+			props: { request: get(appStore).borrowRequests[0], onSend: vi.fn(), open: true }
+		});
+		appStore.replaceState({ ...get(appStore), currentUserId: 'borrower' });
+		appStore.sendRequestMessage('req1', 'Any news?');
+		appStore.replaceState({ ...get(appStore), currentUserId: 'lender' });
+		await rendered.rerender({ request: get(appStore).borrowRequests[0] });
+		await tick();
+		expect(unreadMessageCount(get(appStore).borrowRequests[0], 'lender')).toBe(0);
 	});
 });

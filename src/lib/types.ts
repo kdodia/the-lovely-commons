@@ -84,6 +84,12 @@ export interface BorrowRequest {
    * from older versions lack this — read with `?? []`.
    */
   messages?: RequestMessage[];
+  /**
+   * When each of the two people last opened (or posted to) the thread, as
+   * ISO timestamps by user id. Messages from the other person after this are
+   * unread. Read with `?? {}`.
+   */
+  messagesReadAt?: Record<string, string>;
 }
 
 export interface BorrowHistory {

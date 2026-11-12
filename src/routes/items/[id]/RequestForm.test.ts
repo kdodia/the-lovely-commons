@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/svelte';
 import { get } from 'svelte/store';
 import RequestForm from './RequestForm.svelte';
 import { appStore } from '$lib/store';
+import { toLocalISODate, addDays } from '$lib/dates';
 import { itemPageState, item } from './testFixtures';
 
 function renderForm(overrides: Record<string, unknown> = {}) {
@@ -21,7 +22,7 @@ describe('RequestForm', () => {
 	it('starts as a single button with a hint about the calendar', () => {
 		renderForm();
 		expect(screen.getByRole('button', { name: 'Request to Borrow' })).toBeInTheDocument();
-		expect(screen.getByText('Or select dates from the calendar on the right')).toBeInTheDocument();
+		expect(screen.getByText('Or select dates from the calendar')).toBeInTheDocument();
 	});
 
 	it('opens the form when the button is pressed', async () => {
@@ -32,6 +33,17 @@ describe('RequestForm', () => {
 		// Opening presets a start date (tomorrow), so only the end date is missing
 		expect(screen.getByText('Select an end date from the calendar to complete your booking')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Send Request' })).toBeDisabled();
+	});
+
+	it('presets nothing when every day in the next 60 is blocked', async () => {
+		const blocked = {
+			...item,
+			blockedDates: [{ startDate: toLocalISODate(new Date()), endDate: toLocalISODate(addDays(new Date(), 90)) }]
+		};
+		appStore.replaceState(itemPageState({ items: [blocked] }));
+		renderForm({ item: blocked });
+		await fireEvent.click(screen.getByRole('button', { name: 'Request to Borrow' }));
+		expect(screen.getByText('Select your dates from the calendar to continue')).toBeInTheDocument();
 	});
 
 	it('asks for dates when none are chosen', () => {

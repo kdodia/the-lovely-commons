@@ -17,7 +17,6 @@
   let userItems = $derived(
     $appStore.items.filter(
       (item) => item.lenderId === userId &&
-                item.available &&
                 canUserViewItem(item, $appStore.currentUserId, $appStore)
     )
   );
@@ -123,7 +122,7 @@
 
       <div class="profile-content">
         <section class="items-section">
-          <h2 class="section-title">Available Items ({userItems.length})</h2>
+          <h2 class="section-title">Items ({userItems.length})</h2>
           {#if userItems.length === 0}
             <EmptyState
               compact

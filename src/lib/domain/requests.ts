@@ -37,9 +37,18 @@
  *   `nextNudgeDate`: NUDGE_DELAY_DAYS calendar days after the request was
  *   made, or after the last nudge once there has been one, counted in local
  *   days. The lender is reminded.
+ * - suggested start (`firstSelectableStartDate`): the first day from a given
+ *   date, within 60 days, that is not blocked or booked; none if all are.
  */
 import type { AppState, BorrowRequest, Notification } from '../types';
-import { addDays, formatDisplayDate, rangesOverlap, toLocalISODate, todayLocalISO } from '../dates';
+import {
+  addDays,
+  formatDisplayDate,
+  parseLocalDate,
+  rangesOverlap,
+  toLocalISODate,
+  todayLocalISO
+} from '../dates';
 import { DATE_FORMAT_OPTIONS, NUDGE_DELAY_DAYS } from '../constants';
 import { accept, reject, type Transition } from './transition';
 import { patchById } from './lists';
@@ -381,4 +390,23 @@ export function borrowedBy(state: AppState, userId: string): BorrowRequest[] {
   return state.borrowRequests.filter(
     (req) => req.borrowerId === userId && (req.status === 'approved' || req.status === 'active')
   );
+}
+
+/**
+ * The first day, from `fromDate` onward, that a one-day request for the item
+ * could start on: the same test as `hasDateConflict`, which is also what
+ * greys out days on the booking calendar. Looks at most `windowDays` days
+ * ahead (including `fromDate`) and returns '' when every one is taken.
+ */
+export function firstSelectableStartDate(
+  state: AppState,
+  itemId: string,
+  fromDate: string,
+  windowDays = 60
+): string {
+  for (let offset = 0; offset < windowDays; offset++) {
+    const day = toLocalISODate(addDays(parseLocalDate(fromDate), offset));
+    if (!hasDateConflict(state, itemId, day, day)) return day;
+  }
+  return '';
 }

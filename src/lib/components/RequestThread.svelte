@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { BorrowRequest, RequestMessage } from '$lib/types';
-  import { appStore, canSendRequestMessage } from '$lib/store';
+  import { appStore, canSendRequestMessage, requestThreadEntries, unreadMessageCount } from '$lib/store';
   import { toLocalISODate } from '$lib/dates';
   import { REQUEST_MESSAGE_MAX_LENGTH } from '$lib/constants';
 
@@ -26,12 +26,8 @@
   let otherUser = $derived($appStore.users.find((u) => u.id === otherUserId));
 
   // The borrower's original note opens the thread; it is not stored in `messages`.
-  let entries = $derived<RequestMessage[]>([
-    ...(request.message
-      ? [{ id: `${request.id}-opening`, fromUserId: request.borrowerId, text: request.message, at: request.createdAt }]
-      : []),
-    ...(request.messages ?? [])
-  ]);
+  let entries = $derived<RequestMessage[]>(requestThreadEntries(request));
+  let unread = $derived(unreadMessageCount(request, me));
 
   let canSend = $derived(!!onSend && canSendRequestMessage(request, me));
   let draft = $state('');
@@ -83,6 +79,12 @@
     }
   }
 
+  // Opening the thread, or a message arriving while it is open, marks it read.
+  // Once marked, `unread` is 0 and the rule is not called again.
+  $effect(() => {
+    if (open && unread > 0) appStore.markRequestMessagesRead(request.id);
+  });
+
   // Keep the newest message in view when the thread opens or grows.
   $effect(() => {
     if (open && listElement && entries.length > 0) {
@@ -105,6 +107,9 @@
         Messages ({entries.length})
       {:else}
         Message {otherUser?.name ?? 'the other person'}
+      {/if}
+      {#if unread > 0 && !open}
+        <span class="unread-badge" data-testid="unread-badge">{unread} new</span>
       {/if}
       <span class="chevron" class:open aria-hidden="true">▾</span>
     </button>
@@ -198,6 +203,15 @@
 
   .thread-toggle:hover {
     text-decoration: underline;
+  }
+
+  .unread-badge {
+    padding: 0.0625rem 0.5rem;
+    border-radius: 999px;
+    background-color: var(--primary-dark);
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 600;
   }
 
   .chevron {

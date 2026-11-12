@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { get } from 'svelte/store';
-import { appStore } from '$lib/store';
+import { appStore, unreadMessageCount } from '$lib/store';
 import type { BorrowRequest } from '$lib/types';
 import { REQUEST_MESSAGE_MAX_LENGTH } from '$lib/constants';
 import { createTestState, createTestItem, createLifecycleRequest } from '../../test/fixtures';
@@ -115,5 +115,85 @@ describe('sendRequestMessage', () => {
 	it('reports a missing request', () => {
 		setup();
 		expect(appStore.sendRequestMessage('nope', 'Hi')).toEqual({ ok: false, error: 'Request not found' });
+	});
+});
+
+describe('unread messages', () => {
+	// user1 borrows, user2 lends. Opening note at 09:00, then a reply and a follow-up.
+	const base = (overrides: Partial<BorrowRequest> = {}) =>
+		createLifecycleRequest({
+			status: 'pending',
+			message: 'Can I borrow it?',
+			createdAt: '2020-01-01T09:00:00Z',
+			messages: [
+				{ id: 'm1', fromUserId: 'user2', text: 'Sure', at: '2020-01-01T10:00:00Z' },
+				{ id: 'm2', fromUserId: 'user1', text: 'Thanks', at: '2020-01-01T11:00:00Z' }
+			],
+			...overrides
+		});
+
+	function setup(request: BorrowRequest, currentUserId = 'user1') {
+		appStore.replaceState(
+			createTestState({
+				currentUserId,
+				items: [createTestItem({ lenderId: 'user2' })],
+				borrowRequests: [request]
+			})
+		);
+	}
+	const stored = () => get(appStore).borrowRequests[0];
+
+	it('counts the other persons messages, and the opening note only for the lender', () => {
+		const r = base();
+		expect(unreadMessageCount(r, 'user1')).toBe(1); // user2's reply
+		expect(unreadMessageCount(r, 'user2')).toBe(2); // opening note + user1's follow-up
+	});
+
+	it('counts only messages newer than the read mark', () => {
+		const r = base({ messagesReadAt: { user1: '2020-01-01T10:00:00Z', user2: '2020-01-01T09:30:00Z' } });
+		expect(unreadMessageCount(r, 'user1')).toBe(0);
+		expect(unreadMessageCount(r, 'user2')).toBe(1);
+	});
+
+	it('is zero for outsiders and for requests persisted without the field or messages', () => {
+		expect(unreadMessageCount(base(), 'user3')).toBe(0);
+		expect(unreadMessageCount(base({ message: '', messages: undefined }), 'user2')).toBe(0);
+	});
+
+	it('marks the thread read for the acting user only', () => {
+		setup(base(), 'user2');
+		expect(appStore.markRequestMessagesRead('req1')).toEqual({ ok: true });
+		expect(Date.parse(stored().messagesReadAt!.user2)).toBeGreaterThan(Date.parse('2020-01-01T11:00:00Z'));
+		expect(stored().messagesReadAt!.user1).toBeUndefined();
+		expect(unreadMessageCount(stored(), 'user2')).toBe(0);
+		expect(unreadMessageCount(stored(), 'user1')).toBe(1);
+	});
+
+	it('returns the same state when nothing is unread', () => {
+		setup(base({ messagesReadAt: { user1: '2020-01-01T10:00:00Z' } }));
+		const before = get(appStore);
+		expect(appStore.markRequestMessagesRead('req1')).toEqual({ ok: true });
+		expect(get(appStore)).toBe(before);
+	});
+
+	it('refuses outsiders and missing requests without changing anything', () => {
+		setup(base(), 'user3');
+		const before = get(appStore);
+		expect(appStore.markRequestMessagesRead('req1').ok).toBe(false);
+		expect(appStore.markRequestMessagesRead('nope')).toEqual({ ok: false, error: 'Request not found' });
+		expect(get(appStore)).toBe(before);
+	});
+
+	it('still marks a closed thread read', () => {
+		setup(base({ status: 'completed' }));
+		appStore.markRequestMessagesRead('req1');
+		expect(unreadMessageCount(stored(), 'user1')).toBe(0);
+	});
+
+	it('sending a message marks the thread read for the sender, not the recipient', () => {
+		setup(base());
+		appStore.sendRequestMessage('req1', 'Pick up at 5?');
+		expect(unreadMessageCount(stored(), 'user1')).toBe(0);
+		expect(unreadMessageCount(stored(), 'user2')).toBe(3);
 	});
 });

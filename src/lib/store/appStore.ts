@@ -61,6 +61,8 @@ function createAppStore() {
       apply((s) => rules.cancelRequest(s, requestId)),
     sendRequestMessage: (requestId: string, text: string): ActionResult =>
       apply((s) => rules.sendRequestMessage(s, requestId, text)),
+    markRequestMessagesRead: (requestId: string): ActionResult =>
+      apply((s) => rules.markRequestMessagesRead(s, requestId)),
     confirmPickup: (requestId: string): ActionResult =>
       apply((s) => rules.confirmPickup(s, requestId)),
     confirmReturn: (requestId: string, feedback: LenderReturnFeedback = {}): ActionResult =>
